@@ -1,0 +1,68 @@
+# Injenium · 灵枢
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+**Injenium（灵枢）** —— 面向具身智能的链上技能经济，结算于 Injective。
+
+一个机器狗技能市场，以外部 **dimOS** blueprint 形式打包（零修改 dimOS 源码，
+通过 `dimos.blueprints` entry point 注册）。机器狗把"困难请求"登记上链，把自己
+录制的记忆蒸馏成参数化的 **配方（recipe）**，应答他人请求，在只调用本机原语技能的
+白名单 **沙箱** 中执行拉取到的配方，并通过链上托管结算、双向评分。拉取到的配方会在
+应答被链上接受**之前**先做哈希校验与沙箱校验；且 requester 始终可以通过取消/退款
+路径回收被锁死的托管金。
+
+目标链：**Injective EVM 测试网**（Chain ID `1439`）。一个文件落地的 **mock chain**
+实现了相同的 `ChainClient` 协议，因此整套闭环可以在真实部署之前先跑通。
+
+## 市场技能（Market skills）
+
+Agent 通过四个 dimOS `@skill` 驱动闭环 —— 可用 `dimos mcp list-tools` 发现、
+用 `dimos mcp call` 调用：
+
+| 技能 | 作用 |
+| --- | --- |
+| `publish_request(need, budget)` | 登记一个困难请求，并锁定 `budget` INJ 进入托管 |
+| `distill_and_publish(request_id, query)` | 从录制记忆蒸馏出去隐私的配方，挂出携带其内容哈希的应答单 |
+| `fetch_and_run(offer_id)` | 校验配方哈希 + 沙箱校验，**通过后**才链上接受并执行 |
+| `pay(offer_id)` | 把托管金释放给应答方并写入评分 |
+
+`fetch_and_run` 在哈希不匹配或任何沙箱校验失败时会 **不触碰链** 直接拒绝，因此坏的
+应答单绝不会把请求卡死在 `Answered`。否则会被锁死的托管金，requester 可通过
+`ChainClient.cancel_request` / `Market.sol::cancelRequest` 回收（`Open` 请求可
+立即取消；`Answered` 但一直未结算的请求在取消超时后可取消）。
+
+## 安装与运行
+
+```bash
+pip install injenium               # 走真链需额外安装 [chain] extra（web3>=7）
+
+# 完整 go2 agentic 栈 + 市场技能：
+dimos run injenium.agentic
+
+# 无头、仅服务端（无机器人、无 LLM key）—— 用于接口级验收：
+dimos run injenium.market
+dimos mcp list-tools               # 4 个市场技能会出现
+```
+
+## 演示（手动，`demo_` 前缀 —— 绝不纳入自动采集）
+
+用宿主运行时的 Python（即提供 `dimos` 的那个）执行：
+
+```bash
+python demo/demo_m2_distill.py     # M2：录制记忆 -> 去隐私配方 + 模板图
+python demo/demo_m3_sandbox.py     # M3：配方驱动白名单原语；不安全步骤被拒
+python demo/demo_m4_mock_loop.py   # M4：在 mock chain 上跑通 发布 -> 应答 -> 执行 -> 支付 -> 评分
+```
+
+`demo_m2`/`demo_m4` 会自动定位 `data/go2_short.db`（本仓库或 dimOS 检出目录）；
+传 `--db /path/to/go2_short.db` 可覆盖。
+
+## 合约（M5）
+
+`contracts/src/Market.sol` 与 `chain/client.py::MARKET_ABI` 一一对应；用 Foundry
+部署到 Injective EVM 测试网并在 Blockscout 验证（见 `contracts/foundry.toml` 头部
+说明），随后用以下参数把 agent 切到真链：
+`--marketskillcontainer-chain-backend injective --marketskillcontainer-market-contract 0x…`。
+
+完整设计与里程碑见 `spec.md`（仓库根目录）。验收仅为接口级 —— 按项目约定不写单元
+测试、不做 TDD。

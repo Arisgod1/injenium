@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+
+# Generated market state + distilled recipe artifacts (spec §链下产物存储)
+injenium_artifacts/
+demo_artifacts/
+*.lock
+
+# Foundry build output (contracts/, M5)
+contracts/out/
+contracts/cache/
+contracts/lib/
+
+# OS
+.DS_Store

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "injenium"
+version = "0.1.0"
+description = "Injenium (灵枢): an on-chain skill marketplace for embodied robots on Injective EVM, packaged as a dimOS blueprint."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Injenium" }]
+keywords = ["injenium", "dimos", "injective", "evm", "robotics", "unitree", "go2", "skill-market"]
+
+# NOTE: `dimos` itself is provided by the host runtime (the machine running the
+# robot agent). We depend on pydantic (already a dimos dependency) for the
+# recipe schema. web3 is an OPTIONAL extra used only by the real Injective
+# client; the mock chain and the whole PoC closed loop run without it.
+dependencies = [
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+# Real on-chain path (Injective EVM testnet/mainnet). Install with:
+#   pip install "injenium[chain]"
+# web3>=7: the client uses eth-account's snake_case `raw_transaction`, which
+# only exists in the eth-account>=0.13 line that web3 v7 pins (web3 6.x would
+# raise AttributeError on the first signed transaction).
+chain = ["web3>=7"]
+# Optional image handling for object-template artifacts + face blur.
+vision = ["numpy", "pillow", "opencv-python"]
+
+# dimOS discovers external blueprints through this entry-point group
+# (see dimos.robot.external_blueprints.ENTRY_POINT_GROUP = "dimos.blueprints").
+# The distribution name `injenium` becomes the namespace, so the runnable
+# names are:
+#   dimos run injenium.agentic   (full go2 stack + market)
+#   dimos run injenium.market    (headless server-only, for interface acceptance)
+[project.entry-points."dimos.blueprints"]
+agentic = "injenium.blueprint:injenium_agentic"
+market = "injenium.blueprint:injenium_market"
+
+[tool.setuptools.packages.find]
+include = ["injenium*"]
+
+[tool.setuptools.package-data]
+injenium = ["py.typed"]
