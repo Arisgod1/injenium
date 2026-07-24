@@ -52,9 +52,12 @@ class ChainConfigMixin(ModuleConfig):
 
     chain_backend: ChainBackend = "mock"
 
-    # Identity. For the mock ledger this is the account address; for the real
-    # client the address is derived from the private key and this is ignored.
-    agent_id: str = "0xA0000000000000000000000000000000000000A0"
+    # Identity override for the account address. The mock ledger acts as this
+    # address; the real client ignores it (its address comes from the signing
+    # key). Empty = auto: derive from the ``ROBOT_IP`` env var when set, else a
+    # fixed PoC default (see identity.py). The same ROBOT_IP feeds the derived
+    # on-chain wallet on testnet.
+    agent_id: str = ""
 
     # Mock backend.
     market_state_path: str = "injenium_artifacts/market_state.json"

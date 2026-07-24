@@ -22,7 +22,6 @@ against the testnet unchanged (spec M5 / "链接口" acceptance).
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from injenium.chain.base import (
@@ -31,6 +30,8 @@ from injenium.chain.base import (
     Request,
     RequestStatus,
 )
+from injenium.config import INJECTIVE_MAINNET_CHAIN_ID
+from injenium.identity import resolve_signing_key
 
 # Minimal ABI mirroring contracts/src/Market.sol. Kept here (not read from a
 # build artifact) so the client works from a bare `pip install` without Foundry.
@@ -197,14 +198,16 @@ class InjectiveClient:
                 "InjectiveClient needs the 'chain' extra: pip install 'injenium[chain]'"
             ) from exc
 
-        key = private_key or os.environ.get("INJECTIVE_PRIVATE_KEY")
-        if not key:
-            raise RuntimeError(
-                "INJECTIVE_PRIVATE_KEY is not set; refusing to build a signing client."
-            )
+        self._chain_id = int(chain_id)
+        # An explicit key / INJECTIVE_PRIVATE_KEY wins; otherwise a testnet
+        # wallet may be derived from ROBOT_IP (refused on mainnet, see
+        # identity.resolve_signing_key).
+        key = resolve_signing_key(
+            private_key,
+            allow_ip_derivation=self._chain_id != INJECTIVE_MAINNET_CHAIN_ID,
+        )
 
         self._w3 = Web3(Web3.HTTPProvider(rpc_url))
-        self._chain_id = int(chain_id)
         self._account = self._w3.eth.account.from_key(key)
         self._contract = self._w3.eth.contract(
             address=Web3.to_checksum_address(contract_address),

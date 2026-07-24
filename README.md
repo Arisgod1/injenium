@@ -48,6 +48,16 @@ dimos run injenium.market
 dimos mcp list-tools               # the 4 market skills appear
 ```
 
+### Wallet identity
+
+Each robot boots with a fixed `ROBOT_IP` (e.g. `10.88.15.25`); the agent derives
+one deterministic wallet from it (`key = sha256(WALLET_SALT ‖ ROBOT_IP)`), used as
+both the mock-ledger identity and the testnet signing wallet — no per-robot key
+wrangling. Set `WALLET_SALT` (a deployment secret) so the key can't be rebuilt
+from the LAN-visible IP. An explicit `INJECTIVE_PRIVATE_KEY` always overrides; on
+mainnet (chain id `1776`) IP derivation is refused and a real
+`INJECTIVE_PRIVATE_KEY` is required.
+
 ## Demos (manual, `demo_` prefix — never auto-collected)
 
 Run with the host runtime's Python (the one that provides `dimos`):

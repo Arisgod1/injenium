@@ -44,6 +44,14 @@ dimos run injenium.market
 dimos mcp list-tools               # 4 个市场技能会出现
 ```
 
+### 钱包身份
+
+每只机器狗启动时带固定的 `ROBOT_IP`（如 `10.88.15.25`）；agent 由它确定性派生
+出唯一钱包（`key = sha256(WALLET_SALT ‖ ROBOT_IP)`），同时用作 mock 账本身份与
+测试网签名钱包，无需逐狗管理私钥。请设置 `WALLET_SALT`（部署机密），使私钥
+无法仅凭局域网可见的 IP 反推。显式 `INJECTIVE_PRIVATE_KEY` 始终优先；主网
+（chain id `1776`）拒绝 IP 派生，必须提供真实 `INJECTIVE_PRIVATE_KEY`。
+
 ## 演示（手动，`demo_` 前缀 —— 绝不纳入自动采集）
 
 用宿主运行时的 Python（即提供 `dimos` 的那个）执行：

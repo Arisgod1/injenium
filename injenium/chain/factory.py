@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from injenium.chain.base import ChainClient
 from injenium.config import ChainConfigMixin
+from injenium.identity import resolve_mock_address
 
 
 def build_chain_client(config: ChainConfigMixin) -> ChainClient:
@@ -29,7 +30,10 @@ def build_chain_client(config: ChainConfigMixin) -> ChainClient:
     if config.chain_backend == "mock":
         from injenium.chain.mock_chain import MockChain
 
-        return MockChain(state_path=config.market_state_path, address=config.agent_id)
+        return MockChain(
+            state_path=config.market_state_path,
+            address=resolve_mock_address(config.agent_id),
+        )
 
     if config.chain_backend == "injective":
         if not config.market_contract:
