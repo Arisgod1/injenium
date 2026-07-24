@@ -65,7 +65,10 @@ contract Market {
     // -- requests -----------------------------------------------------------
 
     /// @notice Register a hard-request and lock the sent INJ as escrow.
-    function publishRequest(string calldata need, string[] calldata tags)
+    /// @dev    `tags` is `memory` (not `calldata`): copying a nested calldata
+    ///         dynamic array (string[]) into storage is unsupported by the
+    ///         legacy codegen; memory->storage is fine and the ABI is identical.
+    function publishRequest(string calldata need, string[] memory tags)
         external
         payable
         returns (uint256 id)
@@ -154,6 +157,9 @@ contract Market {
         require(
             r.status == RequestStatus.Open ||
                 (r.status == RequestStatus.Answered &&
+                    // Bounded 1-hour timeout; a validator's few-second drift on
+                    // block.timestamp cannot meaningfully game it.
+                    // forge-lint: disable-next-line(block-timestamp)
                     block.timestamp >= r.createdTs + CANCEL_TIMEOUT),
             "cannot cancel"
         );

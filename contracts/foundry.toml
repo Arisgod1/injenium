@@ -11,9 +11,9 @@
 #       --verifier-url https://testnet.blockscout.injective.network/api
 #
 # Then point the agent at it:
-#   dimos run injenium.agentic \
-#       --marketskillcontainer-chain-backend injective \
-#       --marketskillcontainer-market-contract 0x<deployed address>
+#   dimos run injenium.market \
+#       -o marketskillcontainer.chain_backend=injective \
+#       -o marketskillcontainer.market_contract=0x<deployed address>
 
 [profile.default]
 src = "src"

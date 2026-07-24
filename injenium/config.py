@@ -80,6 +80,12 @@ class MarketConfig(ChainConfigMixin):
     # Default rating written after a successful settlement (1..5).
     default_rating: int = 5
 
+    # Off-chain recipe storage: "local" (PoC default; recipe_uri is a local dir)
+    # or "ipfs" (pin the recipe dir, put an ipfs://<cid> on-chain so two
+    # machines share it). "ipfs" needs a reachable IPFS/Kubo HTTP API.
+    recipe_storage: Literal["local", "ipfs"] = "local"
+    ipfs_api_url: str = "http://127.0.0.1:5001"
+
 
 class RequestListenerConfig(ChainConfigMixin):
     """Config for :class:`RequestListener` (the "wait for requests" module)."""

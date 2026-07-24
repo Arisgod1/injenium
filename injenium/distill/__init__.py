@@ -107,6 +107,8 @@ def distill_to_recipe(
     template_count: int = 1,
     preconditions: list[str] | None = None,
     success_criteria: str = "",
+    storage: str = "local",
+    ipfs_api_url: str | None = None,
     **traj_kwargs: Any,
 ) -> tuple[Recipe, str]:
     """Distill a recorded session into a saved, whitelist-valid :class:`Recipe`.
@@ -123,7 +125,10 @@ def distill_to_recipe(
             ``min_step_m``, ``max_points``).
 
     Returns:
-        ``(recipe, recipe_dir)`` — the recipe is already saved in ``recipe_dir``.
+        ``(recipe, uri)`` — the recipe is saved under ``artifacts_dir``; ``uri``
+        is the local recipe dir, or an ``ipfs://<cid>`` pointer when
+        ``storage="ipfs"`` (the whole dir is pinned so template artifacts
+        resolve under the same CID and ``content_hash`` is unchanged).
 
     Raises:
         ValueError: if the distilled recipe violates the primitive whitelist.
@@ -154,6 +159,10 @@ def distill_to_recipe(
         raise ValueError("distilled recipe is invalid: " + "; ".join(problems))
 
     recipe.save(recipe_dir)
+    if storage == "ipfs":
+        from injenium.distill import ipfs  # noqa: PLC0415
+
+        return recipe, ipfs.publish_dir(recipe_dir, api_url=ipfs_api_url)
     return recipe, recipe_dir
 
 

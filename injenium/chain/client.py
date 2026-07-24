@@ -207,7 +207,23 @@ class InjectiveClient:
             allow_ip_derivation=self._chain_id != INJECTIVE_MAINNET_CHAIN_ID,
         )
 
-        self._w3 = Web3(Web3.HTTPProvider(rpc_url))
+        # A resilient session: retry connection / TLS-handshake failures (some
+        # RPCs — e.g. the Injective testnet endpoint — intermittently reset the
+        # TLS handshake). ``read=0`` guarantees an already-sent tx is never
+        # re-broadcast; only failed *connections* (nothing sent yet) are retried.
+        import requests  # noqa: PLC0415
+        from requests.adapters import HTTPAdapter  # noqa: PLC0415
+        from urllib3.util.retry import Retry  # noqa: PLC0415
+
+        _session = requests.Session()
+        _adapter = HTTPAdapter(
+            max_retries=Retry(total=6, connect=6, read=0, status=0, backoff_factor=0.5)
+        )
+        _session.mount("https://", _adapter)
+        _session.mount("http://", _adapter)
+        self._w3 = Web3(
+            Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 30}, session=_session)
+        )
         self._account = self._w3.eth.account.from_key(key)
         self._contract = self._w3.eth.contract(
             address=Web3.to_checksum_address(contract_address),

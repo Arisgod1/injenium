@@ -76,7 +76,7 @@ pass `--db /path/to/go2_short.db` to override.
 `contracts/src/Market.sol` mirrors `chain/client.py::MARKET_ABI`; deploy to the
 Injective EVM testnet and verify on Blockscout with Foundry (see the header of
 `contracts/foundry.toml`), then switch the agent to the real chain with
-`--marketskillcontainer-chain-backend injective --marketskillcontainer-market-contract 0x…`.
+`-o marketskillcontainer.chain_backend=injective -o marketskillcontainer.market_contract=0x…` (same on `requestlistener`).
 
 See `spec.md` (repo root) for the full design and milestones. Verification is
 interface-level only — no unit tests / no TDD by project policy.

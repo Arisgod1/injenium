@@ -10,6 +10,12 @@ dist/
 .venv/
 venv/
 
+# Local secrets (keep .env.example tracked, ignore the real .env)
+.env
+
+# Foundry deploy broadcast logs
+contracts/broadcast/
+
 # Generated market state + distilled recipe artifacts (spec §链下产物存储)
 injenium_artifacts/
 demo_artifacts/

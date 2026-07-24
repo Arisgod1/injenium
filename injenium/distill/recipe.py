@@ -125,11 +125,18 @@ class Recipe(BaseModel):
 
 
 def load_recipe(uri: str | os.PathLike[str]) -> Recipe:
-    """Load a recipe from a directory or a ``recipe.json`` file path.
+    """Load a recipe from an ``ipfs://<cid>`` pointer or a local path.
 
-    ``uri`` is the off-chain pointer stored in an :class:`Offer`. For the PoC
-    it is a local path; IPFS/Arweave resolution would slot in here.
+    ``uri`` is the off-chain pointer stored in an :class:`Offer`: either an
+    ``ipfs://<cid>`` CID (resolved through the IPFS HTTP API, so two machines
+    share the artifact) or, for the zero-dependency PoC, a local directory /
+    ``recipe.json`` path.
     """
+    from injenium.distill import ipfs  # noqa: PLC0415 -- avoids an import cycle
+
+    if ipfs.is_ipfs_uri(uri):
+        raw = ipfs.cat(f"{ipfs.cid_from_uri(uri)}/{RECIPE_FILENAME}")
+        return Recipe.model_validate(json.loads(raw))
     p = Path(os.fspath(uri))
     if p.is_dir():
         p = p / RECIPE_FILENAME

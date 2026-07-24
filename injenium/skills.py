@@ -112,17 +112,19 @@ class MarketSkillContainer(Module):
             A confirmation including the new offer id and the recipe hash.
         """
         request = self._chain.get_request(request_id)
-        recipe, recipe_dir = distill_to_recipe(
+        recipe, recipe_uri = distill_to_recipe(
             db_path=self.config.memory_db,
             intent=request.need,
             artifacts_dir=self.config.artifacts_dir,
             query=query,
             success_criteria=request.need,
+            storage=self.config.recipe_storage,
+            ipfs_api_url=self.config.ipfs_api_url,
         )
         recipe_hash = recipe.content_hash()
         offer_id = self._chain.submit_offer(
             request_id=request_id,
-            recipe_uri=recipe_dir,
+            recipe_uri=recipe_uri,
             recipe_hash=recipe_hash,
             price=request.budget,
         )

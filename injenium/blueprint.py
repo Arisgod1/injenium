@@ -10,9 +10,10 @@
 
 Two runnable blueprints are exposed:
 
-* ``injenium_market`` — headless: just the market skills, the request
-  listener, and a mock primitive provider. It imports no robot-only deps so it
-  loads on any box (this is the interface-acceptance target: ``dimos mcp
+* ``injenium_market`` — headless: the market skills, the request listener, a
+  mock primitive provider, and an ``McpServer``. It imports no robot-only deps
+  so it loads on any box, and the ``McpServer`` exposes the skills over HTTP so
+  they can be driven with no LLM (the interface-acceptance target: ``dimos mcp
   list-tools`` / ``dimos mcp call``).
 * ``injenium_agentic`` — the full Go2 agentic stack (spatial + MCP
   server/client + common skills) with the market modules and the real
@@ -38,12 +39,18 @@ if TYPE_CHECKING:
     from dimos.core.coordination.blueprints import Blueprint
 
 # Headless market-only blueprint (no robot deps) — safe to import anywhere.
+from dimos.agents.mcp.mcp_server import McpServer  # noqa: E402
 from dimos.core.coordination.blueprints import autoconnect  # noqa: E402
 
+# ``McpServer`` serves every ``@skill`` as an MCP tool over HTTP (port 9990) so
+# the four market skills can be driven with **no LLM** (``dimos mcp list-tools``
+# / ``dimos mcp call``) — the interface-acceptance path. ``McpClient`` (the LLM
+# agent) stays out of the headless blueprint; it only appears in the agentic one.
 injenium_market: Blueprint = autoconnect(
     MarketSkillContainer.blueprint(),
     RequestListener.blueprint(),
     MockPrimitives.blueprint(),
+    McpServer.blueprint(),
 )
 
 

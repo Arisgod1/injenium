@@ -70,7 +70,7 @@ python demo/demo_m4_mock_loop.py   # M4：在 mock chain 上跑通 发布 -> 应
 `contracts/src/Market.sol` 与 `chain/client.py::MARKET_ABI` 一一对应；用 Foundry
 部署到 Injective EVM 测试网并在 Blockscout 验证（见 `contracts/foundry.toml` 头部
 说明），随后用以下参数把 agent 切到真链：
-`--marketskillcontainer-chain-backend injective --marketskillcontainer-market-contract 0x…`。
+`-o marketskillcontainer.chain_backend=injective -o marketskillcontainer.market_contract=0x…`（`requestlistener` 同理）。
 
 完整设计与里程碑见 `spec.md`（仓库根目录）。验收仅为接口级 —— 按项目约定不写单元
 测试、不做 TDD。
