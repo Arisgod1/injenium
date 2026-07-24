@@ -3,6 +3,18 @@
 面向"在机器狗上跑起市场"的**逐步命令**。项目是外部 dimOS blueprint 包,`injenium.agentic`
 即"完整 Go2 栈 + 市场模块"的接入形态。测试分层见 `TESTING.md`,踩坑记录见 `TESTNET_NOTES.md`。
 
+## 架构:你在复用什么
+项目分两层(重构后):
+- **`injenium.core`** —— 域无关的经验能力市场内核:链/合约、市场技能(四个闭环技能 + 只读自检 `chain_status`)、内容寻址
+  配方、**注册表驱动的沙箱**、身份、`build_market` 工厂。
+- **`injenium.domains.go2`** —— 机器狗领域插件:原语白名单 + dispatch 适配器、mock/真机
+  provider、记忆蒸馏;用内核工厂产出 `injenium.market`(无头)/ `injenium.agentic`(整机)。
+
+**应用到你的狗有两条路:**
+1. **Unitree Go2(或原语兼容的狗)** → 直接用 `go2` 域:走下面步骤 0–3 + 阶段 A/B。
+2. **别的机器狗 / 别的能力** → 照 `go2` 写一个新域(见文末「适配你自己的机器狗」),
+   **内核一行不改**。
+
 > 约定
 > - `$DPY` = 机器狗上 **dimOS 运行时的 Python**(Python 3.12 的 venv,dimos 就装在里面)。
 >   例:`export DPY=/opt/dimos/.venv/bin/python`(路径按机器狗实际改)。相应 `dimos` = 同目录的 `bin/dimos`。
@@ -28,11 +40,12 @@ $(dirname $DPY)/dimos list | grep injenium # 应打印 injenium.agentic / injeni
 ```bash
 cd /path/to/injenium
 $(dirname $DPY)/dimos run injenium.market -d          # 无头:市场技能+监听+mock原语+McpServer
-$(dirname $DPY)/dimos mcp list-tools                  # 应看到 publish_request/distill_and_publish/fetch_and_run/pay
+$(dirname $DPY)/dimos mcp list-tools                  # 应看到 chain_status/publish_request/distill_and_publish/fetch_and_run/pay
+$(dirname $DPY)/dimos mcp call chain_status           # 只读自检:钱包/余额/链是否可达(不花钱)
 $(dirname $DPY)/dimos mcp call publish_request --arg need="test" --arg budget=1.0
 $(dirname $DPY)/dimos stop
 ```
-能列出 4 个技能、调用返回 str,即"技能契约"打通。
+能列出 5 个技能(含只读自检 chain_status)、调用返回 str,即"技能契约"打通。
 
 ## 步骤 3 · 配置身份 + 环境变量
 在机器狗上准备 `.env`(参考仓库 `.env.example`),或直接 export:
@@ -40,7 +53,7 @@ $(dirname $DPY)/dimos stop
 export ROBOT_IP=10.88.15.25          # 每台固定(系统已注入,确认即可)
 export WALLET_SALT='本队部署机密'      # 混入钱包派生,避免仅凭 IP 反推
 # 打印本机派生钱包地址(测试网领水用):
-ROBOT_IP=$ROBOT_IP WALLET_SALT=$WALLET_SALT $DPY -c "from injenium.identity import derive_address as a; import os; print(a(os.environ['ROBOT_IP']))"
+ROBOT_IP=$ROBOT_IP WALLET_SALT=$WALLET_SALT $DPY -c "from injenium.core.identity import derive_address as a; import os; print(a(os.environ['ROBOT_IP']))"
 ```
 说明:`agent_id` 默认空 → 由 `ROBOT_IP`+`WALLET_SALT` 确定性派生;每台狗 IP 不同 → 钱包不同,无需手配。
 
@@ -126,3 +139,22 @@ $(dirname $DPY)/dimos run injenium.agentic -d \
 - **`dimos mcp` 连不上**:确认所跑 blueprint 含 McpServer(`agentic`/`market` 都含)。
 - **forge 部署 `tls handshake eof`**:改用 `contracts/deploy_web3.py`(见上)。
 - **Injective 自动闭环卡在等回执**:`InjectiveClient` 依赖同步回执,在 Injective 上会超时(交易其实已上链)。真机测试网 demo 建议**先用 mock 账本**,或先改造 `_send`/`_decode_id` 为"轮询 nonce + 读状态取 id"(见 `TESTNET_NOTES.md` 遗留项)。
+
+---
+
+## 适配你自己的机器狗(非 Unitree Go2)
+内核不含任何机器人代码;换机器人/换能力 = **新增一个域,内核零改动**。照
+`injenium/domains/go2/` 依葫芦画瓢写 `injenium/domains/<yourbot>/`:
+
+| 文件 | 职责 |
+|---|---|
+| `providers.py` | 你的原语 provider(mock + 真机),满足 `injenium.core.specs.PrimitiveSkillsSpec` |
+| `primitives.py` | 每个原语的 `PrimitiveSpec`(参数校验)+ 显式适配器 `dispatch(provider, params)` + `register(registry)` |
+| `distiller.py` | 把你的录制/经验蒸馏成 `Recipe`(实现 `injenium.core.distill.Distiller`) |
+| `models.py`(可选) | 放进 `Recipe.payload` 的领域数据模型 |
+| `blueprint.py` | 用 `injenium.core.blueprint.build_market(provider_blueprint=…, extra=[…])` 产出 market / agentic |
+| `__init__.py` | 导入即 `register(default_registry)` + `set_default_distiller(...)` |
+
+最后在 `pyproject.toml` 的 `[project.entry-points."dimos.blueprints"]` 注册你的 blueprint
+(`dimos run <你的名字>.market|agentic` 即可)。沙箱只调用你注册的适配器、永不 `eval`
+配方名——新域自动继承这条安全边界。

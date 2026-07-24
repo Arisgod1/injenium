@@ -81,7 +81,7 @@ curl -s -X POST https://k8s.testnet.json-rpc.injective.network/ \
 
 ### 3.2 打印身份 + 领水(浏览器)
 ```bash
-ROBOT_IP=10.88.15.25 WALLET_SALT='你的部署机密' python -c "import os;from injenium.identity import derive_address,derive_private_key as k;ip=os.environ['ROBOT_IP'];print('ADDR',derive_address(ip));print('KEY',k(ip))"
+ROBOT_IP=10.88.15.25 WALLET_SALT='你的部署机密' python -c "import os;from injenium.core.identity import derive_address,derive_private_key as k;ip=os.environ['ROBOT_IP'];print('ADDR',derive_address(ip));print('KEY',k(ip))"
 ```
 把打印的 `ADDR` 拿到 https://testnet.faucet.injective.network/ 领测试 INJ;`KEY` 即「资助 key」。
 (简单起见 A、B 可用同一地址;要真·双钱包则领两个。)
@@ -109,7 +109,7 @@ python demo/demo_m5_onchain.py \
 
 ## 接口级验收(dimos mcp,无 LLM 驱动技能)
 
-`injenium.market` 已挂 `McpServer`,可用命令直接驱动 4 个 `@skill`(可指向 mock 或测试网)。
+`injenium.market` 已挂 `McpServer`,可用命令直接驱动 5 个 `@skill`(含只读自检 `chain_status`;可指向 mock 或测试网)。
 
 ```bash
 # 起 headless 市场服务(后台);指向测试网需给两个模块都配链
@@ -124,7 +124,8 @@ dimos run injenium.market -d \
   -o requestlistener.chain_id=1439 \
   -o requestlistener.rpc_url=https://k8s.testnet.json-rpc.injective.network/
 
-dimos mcp list-tools                                       # 列出 4 个市场技能
+dimos mcp list-tools                                       # 列出 5 个市场技能(含 chain_status)
+dimos mcp call chain_status                                # 只读自检:钱包/余额/链是否可达(不花钱)
 dimos mcp call publish_request --arg need="climb the ramp" --arg budget=0.1
 dimos mcp call distill_and_publish --arg request_id=1 --arg query="ramp"
 dimos mcp call fetch_and_run --arg offer_id=1

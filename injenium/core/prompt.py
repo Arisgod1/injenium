@@ -25,6 +25,11 @@ You can buy and sell robot skills on an on-chain marketplace. Money is INJ held
 in escrow by the market contract; recipes are parameterized, de-privatised
 plans that run in a sandbox — never foreign code.
 
+## Checking whether you can go on-chain
+If asked "can you go on-chain?" / "do you have a blockchain skill?", call:
+- `chain_status()` — read-only: reports your wallet address, balance, and
+  whether the chain is reachable. It costs nothing and locks no escrow.
+
 ## When you are stuck
 If you cannot complete a task with your own skills, publish it for others to
 answer, then run the recipe you get back:

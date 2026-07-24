@@ -6,12 +6,15 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""The four agent-facing market skills (spec §5) — domain-neutral.
+"""The agent-facing market skills (spec §5) — domain-neutral.
 
 :class:`MarketSkillContainer` is a dimOS ``Module`` whose ``@skill`` methods the
 LLM calls to drive the closed loop:
 
     publish_request  -> distill_and_publish -> fetch_and_run -> pay
+
+plus a read-only ``chain_status`` self-check so the agent can answer "can you
+go on-chain?" without spending anything.
 
 Each skill obeys the dimOS skill contract (docstring + fully typed args + ``str``
 return) so it shows up in ``dimos mcp list-tools`` and is callable via
@@ -34,6 +37,7 @@ from injenium.core.chain.base import ChainClient, inj_to_wei, wei_to_inj
 from injenium.core.chain.factory import build_chain_client
 from injenium.core.config import MarketConfig
 from injenium.core.distill import get_default_distiller
+from injenium.core.identity import resolve_mock_address
 from injenium.core.recipe import load_recipe
 from injenium.core.sandbox import SandboxInterpreter
 from injenium.core.specs import PrimitiveSkillsSpec
@@ -71,6 +75,53 @@ class MarketSkillContainer(Module):
         super().stop()
 
     # -- skills --------------------------------------------------------------
+
+    @skill
+    def chain_status(self) -> str:
+        """Report whether the robot can go on-chain, and with which wallet.
+
+        Read-only self-check for questions like "can you go on-chain?" / "do you
+        have a blockchain skill?". It spends nothing and locks no escrow: it
+        names the active chain backend and the robot's wallet, and — by reading
+        that wallet's balance — reports whether the chain is reachable right
+        now. Run it before ``publish_request``/``pay`` to confirm the robot is
+        connected and funded.
+
+        Returns:
+            A human-readable line stating the backend, wallet, balance, and
+            whether transacting is possible (or why it is not).
+        """
+        cfg = self.config
+        backend = cfg.chain_backend
+        try:
+            chain = self._chain
+            address = chain.address
+            balance = wei_to_inj(chain.balance_of(address))
+        except Exception as exc:  # self-check must never crash the agent
+            intended = resolve_mock_address(cfg.agent_id)
+            logger.warning("chain_status: %s backend unavailable: %s", backend, exc)
+            return (
+                f"On-chain check: backend={backend}, but I cannot transact right "
+                f"now: {exc}. Intended wallet {intended}. For the injective "
+                f"backend, check market_contract, INJECTIVE_PRIVATE_KEY, and RPC "
+                f"{cfg.rpc_url}."
+            )
+
+        if backend == "mock":
+            logger.info("chain_status: mock ledger ok for %s", address)
+            return (
+                f"On-chain check: backend=mock (local file ledger at "
+                f"{cfg.market_state_path}, no network needed). Wallet {address} "
+                f"holds {balance} INJ (auto-funded on first request). I can run "
+                f"the full market loop off-chain."
+            )
+
+        logger.info("chain_status: injective reachable for %s", address)
+        return (
+            f"On-chain check: backend=injective, chain_id={cfg.chain_id}, "
+            f"contract={cfg.market_contract}. Wallet {address} is reachable on "
+            f"{cfg.rpc_url} and holds {balance} INJ. Ready to transact on-chain."
+        )
 
     @skill
     def publish_request(self, need: str, budget: float) -> str:

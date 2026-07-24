@@ -54,7 +54,15 @@ def _build_agentic() -> Blueprint:
         provider_blueprint=Go2Primitives.blueprint(),
         extra=(
             unitree_go2_spatial,
-            McpClient.blueprint(system_prompt=market_system_prompt()),
+            # Match the stock ``unitree_go2_agentic`` model. McpClientConfig
+            # defaults ``model`` to ``gpt-5.6-luna``; if we only pass
+            # ``system_prompt`` the agent silently falls back to that default and
+            # never replies when it is not wired up. Keep this in lockstep with
+            # dimos' ``unitree_go2_agentic`` blueprint.
+            McpClient.blueprint(
+                model="anthropic:MiniMax-M3",
+                system_prompt=market_system_prompt(),
+            ),
             _common_agentic,
         ),
     )

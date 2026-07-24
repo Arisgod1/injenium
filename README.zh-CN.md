@@ -16,11 +16,12 @@
 
 ## 市场技能（Market skills）
 
-Agent 通过四个 dimOS `@skill` 驱动闭环 —— 可用 `dimos mcp list-tools` 发现、
-用 `dimos mcp call` 调用：
+Agent 用一个只读的 `chain_status` 自检，加四个驱动闭环的 dimOS `@skill` ——
+可用 `dimos mcp list-tools` 发现、用 `dimos mcp call` 调用：
 
 | 技能 | 作用 |
 | --- | --- |
+| `chain_status()` | **只读** 自检：报告钱包地址、余额与链是否可达（回答“能不能上链？”），不花钱、不锁托管 |
 | `publish_request(need, budget)` | 登记一个困难请求，并锁定 `budget` INJ 进入托管 |
 | `distill_and_publish(request_id, query)` | 从录制记忆蒸馏出去隐私的配方，挂出携带其内容哈希的应答单 |
 | `fetch_and_run(offer_id)` | 校验配方哈希 + 沙箱校验，**通过后**才链上接受并执行 |
@@ -34,14 +35,14 @@ Agent 通过四个 dimOS `@skill` 驱动闭环 —— 可用 `dimos mcp list-too
 ## 安装与运行
 
 ```bash
-pip install injenium               # 走真链需额外安装 [chain] extra（web3>=7）
+pip install -e '.[chain]'          # 以 editable 装进 dimOS 运行时的 Python（不在 PyPI 上）；[chain]=web3>=7 走真链
 
 # 完整 go2 agentic 栈 + 市场技能：
 dimos run injenium.agentic
 
 # 无头、仅服务端（无机器人、无 LLM key）—— 用于接口级验收：
 dimos run injenium.market
-dimos mcp list-tools               # 4 个市场技能会出现
+dimos mcp list-tools               # 市场技能会出现（含 chain_status）
 ```
 
 ### 钱包身份
@@ -71,6 +72,8 @@ python demo/demo_m4_mock_loop.py   # M4：在 mock chain 上跑通 发布 -> 应
 部署到 Injective EVM 测试网并在 Blockscout 验证（见 `contracts/foundry.toml` 头部
 说明），随后用以下参数把 agent 切到真链：
 `-o marketskillcontainer.chain_backend=injective -o marketskillcontainer.market_contract=0x…`（`requestlistener` 同理）。
+
+在真实机器狗上接入的逐步命令(含如何适配非 Go2 机器狗)见 `INTEGRATION.md`;分层测试流程见 `TESTING.md`。
 
 完整设计与里程碑见 `spec.md`（仓库根目录）。验收仅为接口级 —— 按项目约定不写单元
 测试、不做 TDD。

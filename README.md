@@ -19,11 +19,13 @@ loop runs before any real deployment.
 
 ## Market skills
 
-The agent drives the loop through four dimOS `@skill`s — discoverable via
-`dimos mcp list-tools`, callable via `dimos mcp call`:
+The agent uses a read-only `chain_status` self-check plus four loop-driving
+dimOS `@skill`s — discoverable via `dimos mcp list-tools`, callable via
+`dimos mcp call`:
 
 | skill | what it does |
 | --- | --- |
+| `chain_status()` | **read-only** self-check: report the wallet, its balance, and whether the chain is reachable (answers "can you go on-chain?") — spends nothing, locks no escrow |
 | `publish_request(need, budget)` | register a hard-request and lock `budget` INJ in escrow |
 | `distill_and_publish(request_id, query)` | distill a de-privatized recipe from recorded memory, post an offer carrying its content hash |
 | `fetch_and_run(offer_id)` | verify the recipe hash + sandbox-validate it, **then** accept on-chain and run it |
@@ -38,14 +40,14 @@ immediately; answered-but-unsettled ones after the cancel timeout).
 ## Install & run
 
 ```bash
-pip install injenium               # add the [chain] extra (web3>=7) for the real path
+pip install -e '.[chain]'          # editable install into the dimOS runtime's Python (not on PyPI); [chain]=web3>=7 for the real path
 
 # full go2 agentic stack + market skills:
 dimos run injenium.agentic
 
 # headless, server-only (no robot, no LLM key) — for interface acceptance:
 dimos run injenium.market
-dimos mcp list-tools               # the 4 market skills appear
+dimos mcp list-tools               # the market skills appear (incl. chain_status)
 ```
 
 ### Wallet identity
@@ -77,6 +79,9 @@ pass `--db /path/to/go2_short.db` to override.
 Injective EVM testnet and verify on Blockscout with Foundry (see the header of
 `contracts/foundry.toml`), then switch the agent to the real chain with
 `-o marketskillcontainer.chain_backend=injective -o marketskillcontainer.market_contract=0x…` (same on `requestlistener`).
+
+To run this on a real robot dog, follow `INTEGRATION.md` (step-by-step commands,
+including how to adapt it to a non-Go2 robot). Layered testing is in `TESTING.md`.
 
 See `spec.md` (repo root) for the full design and milestones. Verification is
 interface-level only — no unit tests / no TDD by project policy.
