@@ -24,14 +24,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from injenium.chain.base import (
+from injenium.core.chain.base import (
     Offer,
     OfferStatus,
     Request,
     RequestStatus,
 )
-from injenium.config import INJECTIVE_MAINNET_CHAIN_ID
-from injenium.identity import resolve_signing_key
+from injenium.core.config import INJECTIVE_MAINNET_CHAIN_ID
+from injenium.core.identity import resolve_signing_key
 
 # Minimal ABI mirroring contracts/src/Market.sol. Kept here (not read from a
 # build artifact) so the client works from a bare `pip install` without Foundry.

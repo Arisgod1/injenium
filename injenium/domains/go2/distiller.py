@@ -6,55 +6,32 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Memory distillation: recorded memory -> de-privatized, parameterized recipe.
+"""Go2 memory distillation: recorded memory -> de-privatized, parameterized recipe.
 
-:func:`distill_to_recipe` is the one call the market skill (and the M2 demo)
-makes. It wires the three concerns kept in separate modules — reading
-(:mod:`extractor`), de-privatising (:mod:`privacy`), and the recipe schema
-(:mod:`recipe`) — into a single artifact written under ``artifacts_dir``.
+Wires the three Go2 concerns — reading (:mod:`extractor`), de-privatising
+(:mod:`privacy`) and the domain payload models (:mod:`models`) — into a saved,
+whitelist-valid :class:`~injenium.core.recipe.Recipe`. :class:`Go2Distiller`
+implements the core :class:`~injenium.core.distill.Distiller` contract that the
+market skill calls; the Go2 domain registers it as the default distiller.
 """
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 import uuid
 
-from injenium.distill.extractor import (
+from injenium.core.recipe import Recipe, Step
+from injenium.domains.go2.extractor import (
     ExtractedMemory,
     FrameSample,
     MemoryExtractor,
     TrajectorySample,
 )
-from injenium.distill.privacy import (
-    make_object_template,
-    relativize_waypoints,
-    strip_device_identifiers,
-)
-from injenium.distill.recipe import (
-    ObjectTemplate,
-    Recipe,
-    RelWaypoint,
-    Step,
-    load_recipe,
-)
+from injenium.domains.go2.privacy import make_object_template, relativize_waypoints
 
-__all__ = [
-    "ExtractedMemory",
-    "FrameSample",
-    "MemoryExtractor",
-    "ObjectTemplate",
-    "Recipe",
-    "RelWaypoint",
-    "Step",
-    "TrajectorySample",
-    "distill_to_recipe",
-    "load_recipe",
-    "strip_device_identifiers",
-    "trajectory_to_steps",
-]
-
-# Whitelist bounds mirrored from specs.PRIMITIVE_WHITELIST for step clamping.
+# Whitelist bounds mirrored from primitives.py for step clamping.
 _MOVE_LIMIT_M = 10.0
 _ROT_LIMIT_DEG = 360.0
 _MIN_SEGMENT_M = 0.05  # segments shorter than this (and un-turning) are dropped
@@ -113,28 +90,15 @@ def distill_to_recipe(
 ) -> tuple[Recipe, str]:
     """Distill a recorded session into a saved, whitelist-valid :class:`Recipe`.
 
-    Args:
-        db_path: recorded ``dimos.memory2`` SQLite store (PoC: go2_short.db).
-        intent: the human intent this recipe fulfils (the request's ``need``).
-        artifacts_dir: parent dir; a fresh per-recipe subdir is created inside.
-        query: optional text used for semantic frame search (best-effort).
-        recipe_name: subdir name; defaults to ``recipe-<8 hex>``.
-        template_count: how many object-template artifacts to extract.
-        preconditions / success_criteria: passed through onto the recipe.
-        traj_kwargs: forwarded to :meth:`MemoryExtractor.extract` (e.g.
-            ``min_step_m``, ``max_points``).
+    Robot-specific de-privatised artifacts (relative waypoints + cropped/blurred
+    object templates) are carried in ``recipe.payload``.
 
     Returns:
         ``(recipe, uri)`` — the recipe is saved under ``artifacts_dir``; ``uri``
         is the local recipe dir, or an ``ipfs://<cid>`` pointer when
         ``storage="ipfs"`` (the whole dir is pinned so template artifacts
         resolve under the same CID and ``content_hash`` is unchanged).
-
-    Raises:
-        ValueError: if the distilled recipe violates the primitive whitelist.
     """
-    from pathlib import Path  # noqa: PLC0415
-
     name = recipe_name or f"recipe-{uuid.uuid4().hex[:8]}"
     recipe_dir = str(Path(artifacts_dir) / name)
 
@@ -150,9 +114,11 @@ def distill_to_recipe(
         intent=intent,
         preconditions=preconditions or [],
         steps=steps,
-        rel_waypoints=rel_waypoints,
-        object_templates=templates,
         success_criteria=success_criteria,
+        payload={
+            "rel_waypoints": [w.model_dump() for w in rel_waypoints],
+            "object_templates": [t.model_dump() for t in templates],
+        },
     )
     problems = recipe.validate_whitelist()
     if problems:
@@ -160,9 +126,9 @@ def distill_to_recipe(
 
     recipe.save(recipe_dir)
     if storage == "ipfs":
-        from injenium.distill import ipfs  # noqa: PLC0415
+        from injenium.core import storage as storage_backend  # noqa: PLC0415
 
-        return recipe, ipfs.publish_dir(recipe_dir, api_url=ipfs_api_url)
+        return recipe, storage_backend.publish_dir(recipe_dir, api_url=ipfs_api_url)
     return recipe, recipe_dir
 
 
@@ -181,16 +147,10 @@ def _select_template_frames(
     return memory.frames[:template_count]
 
 
-def _build_templates(
-    frames: list[FrameSample], recipe_dir: str
-) -> list[ObjectTemplate]:
-    templates: list[ObjectTemplate] = []
+def _build_templates(frames: list[FrameSample], recipe_dir: str) -> list[Any]:
+    templates: list[Any] = []
     for i, frame in enumerate(frames):
-        template = make_object_template(
-            frame,
-            name=f"template_{i}",
-            directory=recipe_dir,
-        )
+        template = make_object_template(frame, name=f"template_{i}", directory=recipe_dir)
         # Keep only templates whose artifact actually landed on disk.
         if template.image_path:
             templates.append(template)
@@ -199,3 +159,30 @@ def _build_templates(
 
 def _clamp(value: float, limit: float) -> float:
     return max(-limit, min(limit, value))
+
+
+class Go2Distiller:
+    """Adapts :func:`distill_to_recipe` to the core :class:`Distiller` contract."""
+
+    def distill(
+        self,
+        *,
+        intent: str,
+        source: str,
+        artifacts_dir: str,
+        query: str | None = None,
+        success_criteria: str = "",
+        storage: str = "local",
+        ipfs_api_url: str | None = None,
+        **kwargs: Any,
+    ) -> tuple[Recipe, str]:
+        return distill_to_recipe(
+            db_path=source,
+            intent=intent,
+            artifacts_dir=artifacts_dir,
+            query=query,
+            success_criteria=success_criteria,
+            storage=storage,
+            ipfs_api_url=ipfs_api_url,
+            **kwargs,
+        )

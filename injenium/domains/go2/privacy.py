@@ -12,7 +12,7 @@ Nothing that could tie a recipe back to a place, a time, or a person may leave
 the dog (spec §3 去隐私). Concretely this module:
 
 * **drops the absolute world frame** — a run of absolute odom poses becomes a
-  list of :class:`~injenium.distill.recipe.RelWaypoint` anchored at the
+  list of :class:`~injenium.domains.go2.models.RelWaypoint` anchored at the
   start pose (translation rotated into the start heading, yaw made relative);
 * **drops wall-clock time** — callers keep only relative offsets, never the
   epoch timestamps carried on observations;
@@ -31,10 +31,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
-from injenium.distill.recipe import ObjectTemplate, RelWaypoint
+from injenium.domains.go2.models import ObjectTemplate, RelWaypoint
 
 if TYPE_CHECKING:
-    from injenium.distill.extractor import FrameSample, TrajectorySample
+    from injenium.domains.go2.extractor import FrameSample, TrajectorySample
 
 # Tag keys considered device-identifying and stripped from any metadata we keep.
 _DEVICE_TAG_KEYS = frozenset(

@@ -34,11 +34,11 @@ from pathlib import Path
 import sys
 import tempfile
 
-from injenium.chain.base import inj_to_wei, wei_to_inj
-from injenium.chain.client import InjectiveClient
-from injenium.distill.recipe import Recipe, Step, load_recipe
-from injenium.primitives import MockPrimitiveExecutor
-from injenium.sandbox import SandboxInterpreter
+from injenium.core.chain.base import inj_to_wei, wei_to_inj
+from injenium.core.chain.client import InjectiveClient
+from injenium.core.recipe import Recipe, Step, load_recipe
+from injenium.domains.go2.providers import MockPrimitiveExecutor
+from injenium.core.sandbox import SandboxInterpreter
 
 # anvil defaults — public dev keys, local-only, NOT secrets.
 ANVIL_RPC = "http://127.0.0.1:8545"

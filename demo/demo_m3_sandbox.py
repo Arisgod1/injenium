@@ -26,9 +26,9 @@ Run with the host runtime's Python::
 
 from __future__ import annotations
 
-from injenium.distill.recipe import Recipe, Step
-from injenium.primitives import MockPrimitiveExecutor
-from injenium.sandbox import RecipeValidationError, SandboxInterpreter
+from injenium.core.recipe import Recipe, Step
+from injenium.domains.go2.providers import MockPrimitiveExecutor
+from injenium.core.sandbox import RecipeValidationError, SandboxInterpreter
 
 
 def _valid_recipe() -> Recipe:

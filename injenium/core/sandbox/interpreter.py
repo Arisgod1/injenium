@@ -6,17 +6,19 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Validate a :class:`~injenium.distill.recipe.Recipe` and run it safely.
+"""Validate a :class:`~injenium.core.recipe.Recipe` and run it safely.
 
 This is the executable trust boundary (spec §4). The interpreter:
 
-* rejects any step whose ``primitive`` is not in
-  :data:`~injenium.specs.PRIMITIVE_WHITELIST`;
+* rejects any step whose ``primitive`` is not in the active
+  :class:`~injenium.core.registry.PrimitiveRegistry`;
 * type/range/choice/length-checks every parameter against that primitive's
-  :class:`~injenium.specs.ParamSpec` rules;
-* dispatches surviving steps to a locally injected
-  :class:`~injenium.specs.PrimitiveSkillsSpec` provider through an explicit
-  typed switch — **never** ``getattr``/``eval`` on recipe-supplied names.
+  :class:`~injenium.core.registry.ParamSpec` rules;
+* dispatches surviving steps through the registered **adapter** for that
+  primitive — a callable a *domain author* wrote, invoked as
+  ``adapter(provider, params)``. The recipe-supplied name only ever selects a
+  pre-registered adapter; it is **never** ``getattr``/``eval``'d onto the
+  provider.
 
 A recipe that fails validation is refused wholesale before any primitive runs
 (``strict`` mode), so a malformed or malicious step never reaches the robot.
@@ -27,12 +29,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from injenium.distill.recipe import Recipe, Step
-from injenium.specs import (
-    PRIMITIVE_WHITELIST,
+from injenium.core.recipe import Recipe, Step
+from injenium.core.registry import (
     ParamSpec,
-    PrimitiveSkillsSpec,
+    PrimitiveRegistry,
     PrimitiveSpec,
+    default_registry,
 )
 
 
@@ -78,17 +80,25 @@ class SandboxInterpreter:
     """Runs whitelisted recipe steps against an injected primitive provider.
 
     Args:
-        primitives: the on-board primitive provider (injected via
-            :class:`PrimitiveSkillsSpec`; the mock provider for demos).
+        primitives: the on-board primitive provider (injected via the domain's
+            provider Spec; the mock provider for demos).
+        registry: the primitive whitelist + dispatch adapters to enforce; the
+            process-wide :data:`~injenium.core.registry.default_registry` a
+            domain populated on import, by default.
         strict: when ``True`` (default) any validation problem aborts the run
             before executing a single step; when ``False`` valid steps still
             run and invalid ones are reported as failed.
     """
 
     def __init__(
-        self, primitives: PrimitiveSkillsSpec, *, strict: bool = True
+        self,
+        primitives: Any,
+        registry: PrimitiveRegistry = default_registry,
+        *,
+        strict: bool = True,
     ) -> None:
         self._primitives = primitives
+        self._registry = registry
         self._strict = strict
 
     # -- validation ----------------------------------------------------------
@@ -103,7 +113,7 @@ class SandboxInterpreter:
         return problems
 
     def _validate_step(self, step: Step) -> list[str]:
-        spec = PRIMITIVE_WHITELIST.get(step.primitive)
+        spec = self._registry.spec(step.primitive)
         if spec is None:
             return [f"unknown primitive {step.primitive!r}"]
         return self._validate_params(spec, step.params)
@@ -163,29 +173,13 @@ class SandboxInterpreter:
         return RunReport(ok=ok, steps=results, message=message)
 
     def _dispatch(self, step: Step) -> str:
-        """Explicit typed switch — no reflection on recipe-supplied names."""
-        p = self._primitives
-        prim = step.primitive
-        params = _coerced_kwargs(PRIMITIVE_WHITELIST[prim], step.params)
-        if prim == "relative_move":
-            return p.relative_move(
-                forward=params.get("forward", 0.0),
-                left=params.get("left", 0.0),
-                degrees=params.get("degrees", 0.0),
-            )
-        if prim == "navigate_with_text":
-            return p.navigate_with_text(query=params["query"])
-        if prim == "follow_person":
-            return p.follow_person(
-                query=params["query"],
-                initial_bbox=params.get("initial_bbox"),
-            )
-        if prim == "execute_sport_command":
-            return p.execute_sport_command(command_name=params["command_name"])
-        if prim == "wait":
-            return p.wait(seconds=params["seconds"])
-        # Unreachable: validate() already gates the primitive name.
-        raise RecipeValidationError([f"unknown primitive {prim!r}"])
+        """Call the registered adapter — no reflection on recipe-supplied names."""
+        registered = self._registry.get(step.primitive)
+        if registered is None:
+            # Unreachable: validate() already gates the primitive name.
+            raise RecipeValidationError([f"unknown primitive {step.primitive!r}"])
+        params = _coerced_kwargs(registered.spec, step.params)
+        return registered.dispatch(self._primitives, params)
 
 
 def _check_value(ps: ParamSpec, value: Any) -> list[str]:

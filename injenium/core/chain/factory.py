@@ -15,9 +15,9 @@ selection logic and swapping backends is a one-line config change (the "无缝�
 
 from __future__ import annotations
 
-from injenium.chain.base import ChainClient
-from injenium.config import ChainConfigMixin
-from injenium.identity import resolve_mock_address
+from injenium.core.chain.base import ChainClient
+from injenium.core.config import ChainConfigMixin
+from injenium.core.identity import resolve_mock_address
 
 
 def build_chain_client(config: ChainConfigMixin) -> ChainClient:
@@ -28,7 +28,7 @@ def build_chain_client(config: ChainConfigMixin) -> ChainClient:
     ``market_contract`` address and the ``INJECTIVE_PRIVATE_KEY`` env var).
     """
     if config.chain_backend == "mock":
-        from injenium.chain.mock_chain import MockChain
+        from injenium.core.chain.mock_chain import MockChain
 
         return MockChain(
             state_path=config.market_state_path,
@@ -40,7 +40,7 @@ def build_chain_client(config: ChainConfigMixin) -> ChainClient:
             raise ValueError(
                 "chain_backend='injective' requires 'market_contract' to be set."
             )
-        from injenium.chain.client import InjectiveClient
+        from injenium.core.chain.client import InjectiveClient
 
         return InjectiveClient(
             rpc_url=config.rpc_url,

@@ -29,7 +29,8 @@ import argparse
 from pathlib import Path
 import sys
 
-from injenium.distill import distill_to_recipe, load_recipe
+from injenium.core.recipe import load_recipe
+from injenium.domains.go2.distiller import distill_to_recipe
 
 # Candidate locations for the PoC recording (spec assumption: repo go2_short.db).
 _DB_CANDIDATES = (
@@ -91,8 +92,8 @@ def main() -> None:
     print(f"content hash : 0x{recipe.content_hash()}")
     print(f"intent       : {recipe.intent}")
     print(f"steps        : {len(recipe.steps)}")
-    print(f"rel_waypoints: {len(recipe.rel_waypoints)}")
-    print(f"templates    : {len(recipe.object_templates)}")
+    print(f"rel_waypoints: {len(recipe.payload.get('rel_waypoints', []))}")
+    print(f"templates    : {len(recipe.payload.get('object_templates', []))}")
 
     print("\nfirst steps:")
     for i, step in enumerate(recipe.steps[:6]):
@@ -100,10 +101,10 @@ def main() -> None:
     if len(recipe.steps) > 6:
         print(f"  ... (+{len(recipe.steps) - 6} more)")
 
-    for tpl in recipe.object_templates:
-        artifact = Path(recipe_dir) / tpl.image_path
+    for tpl in recipe.payload.get("object_templates", []):
+        artifact = Path(recipe_dir) / tpl["image_path"]
         exists = "OK" if artifact.exists() else "MISSING"
-        print(f"\ntemplate {tpl.name!r}: {artifact} [{exists}]")
+        print(f"\ntemplate {tpl['name']!r}: {artifact} [{exists}]")
 
     # Prove the artifact round-trips and the whitelist holds.
     reloaded = load_recipe(recipe_dir)

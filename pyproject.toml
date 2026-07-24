@@ -36,9 +36,10 @@ vision = ["numpy", "pillow", "opencv-python"]
 # names are:
 #   dimos run injenium.agentic   (full go2 stack + market)
 #   dimos run injenium.market    (headless server-only, for interface acceptance)
+# Both blueprints live in the go2 capability domain; the core stays domain-neutral.
 [project.entry-points."dimos.blueprints"]
-agentic = "injenium.blueprint:injenium_agentic"
-market = "injenium.blueprint:injenium_market"
+agentic = "injenium.domains.go2.blueprint:injenium_agentic"
+market = "injenium.domains.go2.blueprint:injenium_market"
 
 [tool.setuptools.packages.find]
 include = ["injenium*"]

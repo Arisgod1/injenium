@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Real-robot provider of :class:`~injenium.specs.PrimitiveSkillsSpec`.
+"""Real-robot provider of :class:`~injenium.core.specs.PrimitiveSkillsSpec`.
 
 On an actual Go2 the five whitelisted primitives live in three separate dimOS
 skill containers (``UnitreeSkillContainer``, ``NavigationSkillContainer``,

@@ -29,7 +29,7 @@ import tempfile
 import time
 import uuid
 
-from injenium.chain.base import (
+from injenium.core.chain.base import (
     Offer,
     OfferStatus,
     Rating,

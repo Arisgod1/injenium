@@ -11,12 +11,12 @@
 The sandbox is the trust boundary for a foreign recipe (spec §4). It never
 imports or ``eval``s anything from the recipe — it validates each step against
 the primitive whitelist and dispatches type-checked calls to a locally injected
-:class:`~injenium.specs.PrimitiveSkillsSpec` provider.
+:class:`~injenium.core.specs.PrimitiveSkillsSpec` provider.
 """
 
 from __future__ import annotations
 
-from injenium.sandbox.interpreter import (
+from injenium.core.sandbox.interpreter import (
     RecipeValidationError,
     RunReport,
     SandboxInterpreter,

@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""The four agent-facing market skills (spec §5).
+"""The four agent-facing market skills (spec §5) — domain-neutral.
 
 :class:`MarketSkillContainer` is a dimOS ``Module`` whose ``@skill`` methods the
 LLM calls to drive the closed loop:
@@ -15,13 +15,12 @@ LLM calls to drive the closed loop:
 
 Each skill obeys the dimOS skill contract (docstring + fully typed args + ``str``
 return) so it shows up in ``dimos mcp list-tools`` and is callable via
-``dimos mcp call``. The chain surface is obtained through
-:func:`~injenium.chain.factory.build_chain_client`, so the identical skill
-code runs against the mock ledger or the Injective testnet by config alone.
-
-Recipe execution in :meth:`fetch_and_run` goes through the sandbox, calling the
-injected :class:`~injenium.specs.PrimitiveSkillsSpec` provider — foreign
-recipe bytes are never imported or ``eval``'d.
+``dimos mcp call``. The chain surface comes from
+:func:`~injenium.core.chain.factory.build_chain_client` (mock or Injective by
+config); distillation is delegated to the domain's registered
+:class:`~injenium.core.distill.Distiller`; execution goes through the sandbox
+against the injected primitive provider — foreign recipe bytes are never
+imported or ``eval``'d.
 """
 
 from __future__ import annotations
@@ -31,12 +30,13 @@ from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.utils.logging_config import setup_logger
 
-from injenium.chain.base import ChainClient, inj_to_wei, wei_to_inj
-from injenium.chain.factory import build_chain_client
-from injenium.config import MarketConfig
-from injenium.distill import distill_to_recipe, load_recipe
-from injenium.sandbox import SandboxInterpreter
-from injenium.specs import PrimitiveSkillsSpec
+from injenium.core.chain.base import ChainClient, inj_to_wei, wei_to_inj
+from injenium.core.chain.factory import build_chain_client
+from injenium.core.config import MarketConfig
+from injenium.core.distill import get_default_distiller
+from injenium.core.recipe import load_recipe
+from injenium.core.sandbox import SandboxInterpreter
+from injenium.core.specs import PrimitiveSkillsSpec
 
 logger = setup_logger()
 
@@ -44,9 +44,10 @@ logger = setup_logger()
 class MarketSkillContainer(Module):
     """Hosts the publish / distill / fetch-run / pay skills for the agent.
 
-    ``_primitives`` is injected by the coordinator at blueprint-build time
-    (``MockPrimitives`` in the headless market blueprint, ``Go2Primitives`` on a
-    real robot); the sandbox drives it during :meth:`fetch_and_run`.
+    ``_primitives`` is injected by the coordinator at blueprint-build time (a
+    mock provider in the headless market blueprint, the real robot provider on
+    a robot); the sandbox drives it during :meth:`fetch_and_run`. Distillation
+    is delegated to the capability domain's registered distiller.
     """
 
     config: MarketConfig
@@ -112,9 +113,9 @@ class MarketSkillContainer(Module):
             A confirmation including the new offer id and the recipe hash.
         """
         request = self._chain.get_request(request_id)
-        recipe, recipe_uri = distill_to_recipe(
-            db_path=self.config.memory_db,
+        recipe, recipe_uri = get_default_distiller().distill(
             intent=request.need,
+            source=self.config.memory_db,
             artifacts_dir=self.config.artifacts_dir,
             query=query,
             success_criteria=request.need,
@@ -211,5 +212,5 @@ class MarketSkillContainer(Module):
         )
 
 
-# Blueprint handle used by blueprint.py (spec §5: `market_skills = ...`).
+# Blueprint handle used by the market factory.
 market_skills = MarketSkillContainer.blueprint

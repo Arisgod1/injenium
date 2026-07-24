@@ -33,12 +33,12 @@ from pathlib import Path
 import sys
 import tempfile
 
-from injenium.chain.base import inj_to_wei, wei_to_inj
-from injenium.chain.mock_chain import MockChain
-from injenium.distill import distill_to_recipe
-from injenium.distill.recipe import Recipe, Step
-from injenium.primitives import MockPrimitiveExecutor
-from injenium.sandbox import SandboxInterpreter
+from injenium.core.chain.base import inj_to_wei, wei_to_inj
+from injenium.core.chain.mock_chain import MockChain
+from injenium.domains.go2.distiller import distill_to_recipe
+from injenium.core.recipe import Recipe, Step
+from injenium.domains.go2.providers import MockPrimitiveExecutor
+from injenium.core.sandbox import SandboxInterpreter
 
 DOG_A = "0xA0000000000000000000000000000000000000A0"  # requester
 DOG_B = "0xB0000000000000000000000000000000000000B0"  # responder
@@ -129,7 +129,7 @@ def main() -> None:
     # 3) Dog A verifies the hash and sandbox-validates the recipe *before*
     #    accepting it on-chain, then runs it (fetch_and_run).
     offer = chain_a.get_offer(offer_id)
-    from injenium.distill import load_recipe
+    from injenium.core.recipe import load_recipe
 
     fetched = load_recipe(offer.recipe_uri)
     if fetched.content_hash() != offer.recipe_hash:

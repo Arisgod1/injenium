@@ -11,7 +11,7 @@
 An external dimOS package that adds an on-chain skill marketplace to the Unitree
 Go2 agent. Public surface is intentionally small — everything the host runtime
 needs is reachable through the ``dimos.blueprints`` entry points defined in
-``pyproject.toml`` (``injenium.blueprint``).
+``pyproject.toml`` (``injenium.domains.go2.blueprint``).
 """
 
 from __future__ import annotations

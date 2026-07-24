@@ -31,9 +31,9 @@ from dimos.core.module import Module
 from dimos.core.transport_factory import make_transport
 from dimos.utils.logging_config import setup_logger
 
-from injenium.chain.base import ChainClient, Request, wei_to_inj
-from injenium.chain.factory import build_chain_client
-from injenium.config import RequestListenerConfig
+from injenium.core.chain.base import ChainClient, Request, wei_to_inj
+from injenium.core.chain.factory import build_chain_client
+from injenium.core.config import RequestListenerConfig
 
 logger = setup_logger()
 

@@ -11,9 +11,9 @@
 Two interchangeable implementations satisfy the same :class:`ChainClient`
 protocol:
 
-* :class:`~injenium.chain.mock_chain.MockChain` — a file-backed, in-process
+* :class:`~injenium.core.chain.mock_chain.MockChain` — a file-backed, in-process
   ledger used to run the whole closed loop before any real deployment.
-* :class:`~injenium.chain.client.InjectiveClient` — a ``web3.py`` wrapper
+* :class:`~injenium.core.chain.client.InjectiveClient` — a ``web3.py`` wrapper
   that talks to the deployed ``Market.sol`` on Injective EVM.
 
 Only pointers/hashes live on-chain; the recipe body and its artifacts stay
@@ -22,7 +22,7 @@ off-chain (local ``artifacts_dir`` for the PoC, IPFS/Arweave later).
 
 from __future__ import annotations
 
-from injenium.chain.base import (
+from injenium.core.chain.base import (
     ChainClient,
     Offer,
     OfferStatus,

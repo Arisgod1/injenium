@@ -16,7 +16,7 @@ identical — so its ``content_hash`` (the on-chain commitment) is unchanged —
 its relative ``image_path`` references resolve under the same CID.
 
 The on-chain pointer becomes ``ipfs://<cid>``;
-:func:`injenium.distill.recipe.load_recipe` resolves it. We talk to the Kubo HTTP
+:func:`injenium.core.recipe.load_recipe` resolves it. We talk to the Kubo HTTP
 API (default ``http://127.0.0.1:5001``, override with ``IPFS_API_URL``) using the
 standard library only — no third-party IPFS package. A running IPFS daemon (or a
 pinning service exposing the same API) is required for this path; the local-path

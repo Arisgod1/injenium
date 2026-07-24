@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Providers that satisfy :class:`~injenium.specs.PrimitiveSkillsSpec`.
+"""Providers that satisfy :class:`~injenium.core.specs.PrimitiveSkillsSpec`.
 
 The sandbox never reflects into the robot's skill registry — it calls a typed
 provider that dimOS injects at blueprint-build time (spec §4). Two providers
@@ -16,7 +16,7 @@ exist, mirroring the mock/real split of the chain client:
   by the ``injenium.market`` blueprint and the M3/M4 demos. It simulates
   each primitive (logs + returns a human string) so the closed loop runs with
   no robot and no LLM keys.
-* ``Go2Primitives`` (in :mod:`injenium.primitives_go2`) — delegates to the
+* ``Go2Primitives`` (in :mod:`injenium.domains.go2.providers_go2`) — delegates to the
   real Unitree/navigation/person-follow skill modules on the robot. It is kept
   in a separate module so importing this one never drags in robot-only deps.
 

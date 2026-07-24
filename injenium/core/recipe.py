@@ -6,20 +6,20 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""The ``Recipe`` data model — the tradeable, executable skill artifact.
+"""The ``Recipe`` data model — the tradeable, executable capability artifact.
 
-A recipe is the only thing that crosses between dogs. It is deliberately:
+A recipe is the only thing that crosses between agents. It is deliberately:
 
 * **parameterized** — a list of steps referencing whitelisted primitives with
   plain params, never code;
-* **de-privatized** — waypoints are relative to a start anchor, timestamps are
-  dropped, object templates are cropped/blurred (see :mod:`privacy`);
 * **content-addressed** — :meth:`content_hash` yields a sha256 the chain stores
-  as ``bytes32`` while the body lives off-chain.
+  as ``bytes32`` while the body lives off-chain;
+* **domain-neutral** — the executable core is ``steps``; anything a domain needs
+  to carry (robot waypoints, cropped templates, …) goes in :attr:`payload` and
+  is hashed with the rest.
 
-The off-chain storage boundary lives here (``save``/``load`` + ``artifacts``):
-swapping the local ``artifacts_dir`` for IPFS/Arweave later touches only this
-module (spec §链下产物存储).
+The off-chain storage boundary lives here (``save`` + :func:`load_recipe`);
+swapping the local dir for IPFS touches only this module + :mod:`injenium.core.storage`.
 """
 
 from __future__ import annotations
@@ -30,72 +30,53 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
-from injenium.specs import PRIMITIVE_WHITELIST
+from injenium.core.registry import PrimitiveRegistry, default_registry
 
 RECIPE_SCHEMA_VERSION = 1
 RECIPE_FILENAME = "recipe.json"
 
 
 class Step(BaseModel):
-    """One executable step: a whitelisted primitive plus its params."""
+    """One executable step: a primitive name plus its params.
+
+    The primitive whitelist is enforced by the sandbox against the active
+    registry (see :mod:`injenium.core.sandbox.interpreter`), not at model
+    construction — the recipe is inert data until the sandbox validates it.
+    """
 
     primitive: str
     params: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("primitive")
-    @classmethod
-    def _known_primitive(cls, v: str) -> str:
-        if v not in PRIMITIVE_WHITELIST:
-            raise ValueError(
-                f"primitive {v!r} is not in the whitelist {tuple(PRIMITIVE_WHITELIST)}"
-            )
-        return v
-
-
-class RelWaypoint(BaseModel):
-    """A waypoint relative to the recipe's start anchor (no absolute frame)."""
-
-    dx: float = 0.0
-    dy: float = 0.0
-    dz: float = 0.0
-    dyaw_deg: float = 0.0
-
-
-class ObjectTemplate(BaseModel):
-    """A reference to a cropped/blurred object image stored beside the recipe."""
-
-    name: str
-    image_path: str  # relative to the recipe directory
-    bbox: list[float] | None = None  # [x1, y1, x2, y2] in the cropped frame
-
 
 class Recipe(BaseModel):
-    """A distilled, shareable skill recipe."""
+    """A distilled, shareable capability recipe."""
 
     intent: str
     preconditions: list[str] = Field(default_factory=list)
     steps: list[Step] = Field(default_factory=list)
-    rel_waypoints: list[RelWaypoint] = Field(default_factory=list)
-    object_templates: list[ObjectTemplate] = Field(default_factory=list)
     success_criteria: str = ""
     schema_version: int = RECIPE_SCHEMA_VERSION
+    # Domain-specific extras (e.g. Go2: rel_waypoints / object_templates).
+    # Hashed with the rest so the on-chain commitment covers it.
+    payload: dict[str, Any] = Field(default_factory=dict)
 
     # -- validation ----------------------------------------------------------
 
-    def validate_whitelist(self) -> list[str]:
-        """Return a list of human-readable violations (empty == valid).
+    def validate_whitelist(self, registry: PrimitiveRegistry | None = None) -> list[str]:
+        """Return human-readable violations (empty == every step is whitelisted).
 
-        Checks that every step references a whitelisted primitive. Parameter
-        type/range checks are the sandbox's job (see interpreter) so a recipe
-        can be inspected without a primitive provider.
+        Checks each step's primitive against ``registry`` (defaults to the
+        process registry a domain has populated). Parameter type/range checks
+        are the sandbox's job.
         """
+        reg = registry if registry is not None else default_registry
         problems: list[str] = []
         if not self.steps:
             problems.append("recipe has no steps")
         for i, step in enumerate(self.steps):
-            if step.primitive not in PRIMITIVE_WHITELIST:
+            if step.primitive not in reg:
                 problems.append(f"step[{i}]: unknown primitive {step.primitive!r}")
         return problems
 
@@ -112,8 +93,8 @@ class Recipe(BaseModel):
     def save(self, directory: str | os.PathLike[str]) -> str:
         """Write ``recipe.json`` into ``directory``; return the file path.
 
-        Object-template artifacts are expected to already live in ``directory``
-        (the distiller writes them there), referenced by relative path.
+        Any artifacts referenced from ``payload`` (by relative path) are
+        expected to already live in ``directory`` (the distiller writes them).
         """
         d = Path(os.fspath(directory))
         d.mkdir(parents=True, exist_ok=True)
@@ -127,15 +108,15 @@ class Recipe(BaseModel):
 def load_recipe(uri: str | os.PathLike[str]) -> Recipe:
     """Load a recipe from an ``ipfs://<cid>`` pointer or a local path.
 
-    ``uri`` is the off-chain pointer stored in an :class:`Offer`: either an
+    ``uri`` is the off-chain pointer stored in an ``Offer``: either an
     ``ipfs://<cid>`` CID (resolved through the IPFS HTTP API, so two machines
     share the artifact) or, for the zero-dependency PoC, a local directory /
     ``recipe.json`` path.
     """
-    from injenium.distill import ipfs  # noqa: PLC0415 -- avoids an import cycle
+    from injenium.core import storage  # noqa: PLC0415 -- avoids an import cycle
 
-    if ipfs.is_ipfs_uri(uri):
-        raw = ipfs.cat(f"{ipfs.cid_from_uri(uri)}/{RECIPE_FILENAME}")
+    if storage.is_ipfs_uri(uri):
+        raw = storage.cat(f"{storage.cid_from_uri(uri)}/{RECIPE_FILENAME}")
         return Recipe.model_validate(json.loads(raw))
     p = Path(os.fspath(uri))
     if p.is_dir():

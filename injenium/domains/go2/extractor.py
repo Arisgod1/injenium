@@ -20,7 +20,7 @@ query API that ships with dimOS (:mod:`dimos.memory2.stream`):
 
 The extractor returns plain, source-agnostic samples; the actual de-privatizing
 (relativising poses, blurring faces, cropping templates) lives in
-:mod:`injenium.distill.privacy` so this stays a thin reader.
+:mod:`injenium.domains.go2.privacy` so this stays a thin reader.
 """
 
 from __future__ import annotations
