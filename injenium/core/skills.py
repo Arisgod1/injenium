@@ -63,6 +63,17 @@ class MarketSkillContainer(Module):
 
     _primitives: PrimitiveSkillsSpec
 
+    # Guard against the Agent re-buying while a recipe is already executing.
+    _running_recipes: set[str]
+
+    @property
+    def _active_runs(self) -> set[str]:
+        runs = getattr(self, "_running_recipes", None)
+        if runs is None:
+            runs = set()
+            self._running_recipes = runs
+        return runs
+
     @property
     def _chain(self) -> ChainClient:
         client = getattr(self, "_chain_client", None)
@@ -427,7 +438,15 @@ class MarketSkillContainer(Module):
                 f"{'; '.join(problems)}"
             )
 
+        # Prevent re-execution while the same offer is already running.
+        if offer_id in self._active_runs:
+            return (
+                f"Offer {offer_id} is already running on the robot. "
+                f"Wait for it to finish, then call pay(offer_id='{offer_id}')."
+            )
+
         self._chain.accept_offer(offer_id)
+        self._active_runs.add(offer_id)
 
         # Run in background — real robot moves far exceed MCP's 120s HTTP
         # timeout; return immediately so the agent loop stays alive.
@@ -437,12 +456,15 @@ class MarketSkillContainer(Module):
                 logger.info("ran offer %s -> ok=%s", offer_id, report.ok)
             except Exception as exc:
                 logger.error("background run failed for offer %s: %s", offer_id, exc)
+            finally:
+                self._active_runs.discard(offer_id)
 
         threading.Thread(target=_bg_run, daemon=True, name=f"run-{offer_id}").start()
         return (
             f"Offer {offer_id} accepted and recipe execution started "
             f"({len(recipe.steps)} steps running in background). "
-            f"Call pay(offer_id='{offer_id}') once the robot finishes."
+            f"Do NOT call fetch_and_run again. Wait for the robot to finish, "
+            f"then call pay(offer_id='{offer_id}')."
         )
 
     @skill
@@ -490,8 +512,17 @@ class MarketSkillContainer(Module):
                 f"{'; '.join(problems)}. Nothing was paid."
             )
 
+        # Prevent re-purchase while the same recipe is already running.
+        if listing_id in self._active_runs:
+            return (
+                f"Listing {listing_id} is already running on the robot "
+                f"(bought earlier this session). Wait for it to finish — "
+                f"do NOT buy again. The robot is moving."
+            )
+
         tx_ref = self._chain.buy_skill(listing_id)
         price = wei_to_inj(listing.price)
+        self._active_runs.add(listing_id)
 
         # Run in background — real robot moves far exceed MCP's 120s HTTP
         # timeout; return immediately so the agent loop stays alive.
@@ -501,11 +532,14 @@ class MarketSkillContainer(Module):
                 logger.info("bought listing %s for %s INJ -> ok=%s", listing_id, price, report.ok)
             except Exception as exc:
                 logger.error("background run failed for listing %s: %s", listing_id, exc)
+            finally:
+                self._active_runs.discard(listing_id)
 
         threading.Thread(target=_bg_run, daemon=True, name=f"run-{listing_id}").start()
         return (
             f"Bought listing {listing_id} for {price} INJ (tx {tx_ref}). "
-            f"Recipe execution started ({len(recipe.steps)} steps running in background on the robot)."
+            f"Recipe execution started ({len(recipe.steps)} steps running in background on the robot). "
+            f"Do NOT call buy_and_run again — just wait for the robot to finish moving."
         )
 
     @skill

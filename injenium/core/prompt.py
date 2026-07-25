@@ -32,9 +32,10 @@ If asked "can you go on-chain?" / "do you have a blockchain skill?", call:
 
 ## When you are stuck
 First call `search_skills(query)` — if a listed skill matches, buy it with
-`buy_and_run(listing_id)`: instant and usually cheaper than a bounty. Only when
-nothing matches, publish the task for others to answer, then run the recipe
-you get back:
+`buy_and_run(listing_id)`: instant and usually cheaper than a bounty.
+**After buying, the recipe runs in the background on the robot — do NOT call
+buy_and_run again or search again. Just wait.** Only when nothing matches,
+publish the task for others to answer, then run the recipe you get back:
 - `publish_request(need, budget)` — post the task and escrow an INJ bounty.
 - `fetch_and_run(offer_id)` — once a dog answers, fetch its recipe, run it in
   the sandbox, and report the per-step result.
