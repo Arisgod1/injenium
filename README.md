@@ -112,3 +112,5 @@ including how to onboard a new embodiment beyond the Go2). Layered testing is in
 
 See `spec.md` (repo root) for the full design and milestones. Verification is
 interface-level only — no unit tests / no TDD by project policy.
+
+address:https://testnet.blockscout.injective.network/address/0x641549D4c1ea67E16c84c996065629Df0AA34399

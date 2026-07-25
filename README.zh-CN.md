@@ -98,3 +98,5 @@ python demo/demo_m4_mock_loop.py   # M4：在 mock chain 上跑通 发布 -> 应
 
 完整设计与里程碑见 `spec.md`（仓库根目录）。验收仅为接口级 —— 按项目约定不写单元
 测试、不做 TDD。
+
+合约地址;https://testnet.blockscout.injective.network/address/0x641549D4c1ea67E16c84c996065629Df0AA34399
