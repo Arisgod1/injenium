@@ -31,6 +31,8 @@ imported or ``eval``'d.
 
 from __future__ import annotations
 
+import threading
+
 from dimos.agents.annotation import skill
 from dimos.core.core import rpc
 from dimos.core.module import Module
@@ -426,11 +428,22 @@ class MarketSkillContainer(Module):
             )
 
         self._chain.accept_offer(offer_id)
-        report = interpreter.run(recipe)
 
-        logger.info("ran offer %s -> ok=%s", offer_id, report.ok)
-        outcome = "succeeded" if report.ok else "FAILED"
-        return f"Offer {offer_id} recipe {outcome}.\n{report.summary()}"
+        # Run in background — real robot moves far exceed MCP's 120s HTTP
+        # timeout; return immediately so the agent loop stays alive.
+        def _bg_run() -> None:
+            try:
+                report = interpreter.run(recipe)
+                logger.info("ran offer %s -> ok=%s", offer_id, report.ok)
+            except Exception as exc:
+                logger.error("background run failed for offer %s: %s", offer_id, exc)
+
+        threading.Thread(target=_bg_run, daemon=True, name=f"run-{offer_id}").start()
+        return (
+            f"Offer {offer_id} accepted and recipe execution started "
+            f"({len(recipe.steps)} steps running in background). "
+            f"Call pay(offer_id='{offer_id}') once the robot finishes."
+        )
 
     @skill
     def buy_and_run(self, listing_id: str) -> str:
@@ -478,13 +491,21 @@ class MarketSkillContainer(Module):
             )
 
         tx_ref = self._chain.buy_skill(listing_id)
-        report = interpreter.run(recipe)
         price = wei_to_inj(listing.price)
-        logger.info("bought listing %s for %s INJ -> ok=%s", listing_id, price, report.ok)
-        outcome = "succeeded" if report.ok else "FAILED"
+
+        # Run in background — real robot moves far exceed MCP's 120s HTTP
+        # timeout; return immediately so the agent loop stays alive.
+        def _bg_run() -> None:
+            try:
+                report = interpreter.run(recipe)
+                logger.info("bought listing %s for %s INJ -> ok=%s", listing_id, price, report.ok)
+            except Exception as exc:
+                logger.error("background run failed for listing %s: %s", listing_id, exc)
+
+        threading.Thread(target=_bg_run, daemon=True, name=f"run-{listing_id}").start()
         return (
-            f"Bought listing {listing_id} for {price} INJ (tx {tx_ref}); recipe "
-            f"{outcome}.\n{report.summary()}"
+            f"Bought listing {listing_id} for {price} INJ (tx {tx_ref}). "
+            f"Recipe execution started ({len(recipe.steps)} steps running in background on the robot)."
         )
 
     @skill
