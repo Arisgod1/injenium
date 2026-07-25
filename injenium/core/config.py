@@ -71,6 +71,11 @@ class ChainConfigMixin(ModuleConfig):
 class MarketConfig(ChainConfigMixin):
     """Config for :class:`MarketSkillContainer`."""
 
+    # Supply side: when true the agent is briefed to list each successfully
+    # completed task on-chain via ``publish_skill`` (runtime-togglable with
+    # the ``set_auto_publish`` skill).
+    auto_publish: bool = False
+
     # Where distilled recipes + template artifacts are written/read.
     artifacts_dir: str = "injenium_artifacts/recipes"
 

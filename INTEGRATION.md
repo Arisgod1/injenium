@@ -5,7 +5,7 @@
 
 ## 架构:你在复用什么
 项目分两层(重构后):
-- **`injenium.core`** —— 域无关的经验能力市场内核:链/合约、市场技能(四个闭环技能 + 只读自检 `chain_status`)、内容寻址
+- **`injenium.core`** —— 域无关的经验能力市场内核:链/合约、市场技能(共 11 个:只读自检/浏览 + 悬赏闭环 + 技能货架)、内容寻址
   配方、**注册表驱动的沙箱**、身份、`build_market` 工厂。
 - **`injenium.domains.go2`** —— 机器狗领域插件:原语白名单 + dispatch 适配器、mock/真机
   provider、记忆蒸馏;用内核工厂产出 `injenium.market`(无头)/ `injenium.agentic`(整机)。
@@ -40,12 +40,13 @@ $(dirname $DPY)/dimos list | grep injenium # 应打印 injenium.agentic / injeni
 ```bash
 cd /path/to/injenium
 $(dirname $DPY)/dimos run injenium.market -d          # 无头:市场技能+监听+mock原语+McpServer
-$(dirname $DPY)/dimos mcp list-tools                  # 应看到 chain_status/publish_request/distill_and_publish/fetch_and_run/pay
+$(dirname $DPY)/dimos mcp list-tools                  # 应看到 11 个技能(自检/浏览 + 悬赏闭环 + 技能货架)
 $(dirname $DPY)/dimos mcp call chain_status           # 只读自检:钱包/余额/链是否可达(不花钱)
+$(dirname $DPY)/dimos mcp call list_requests          # 只读浏览:板上开放请求(不花钱)
 $(dirname $DPY)/dimos mcp call publish_request --arg need="test" --arg budget=1.0
 $(dirname $DPY)/dimos stop
 ```
-能列出 5 个技能(含只读自检 chain_status)、调用返回 str,即"技能契约"打通。
+能列出 11 个技能(只读自检/浏览 + 悬赏闭环 + 技能货架)、调用返回 str,即"技能契约"打通。
 
 ## 步骤 3 · 配置身份 + 环境变量
 在机器狗上准备 `.env`(参考仓库 `.env.example`),或直接 export:
@@ -82,6 +83,8 @@ $(dirname $DPY)/dimos run injenium.agentic -d \
 $(dirname $DPY)/dimos mcp call publish_request --arg need="climb the ramp" --arg budget=1.0
 # B 的 RequestListener 命中后会提示其 agent;或手动:
 $(dirname $DPY)/dimos mcp call distill_and_publish --arg request_id=<id> --arg query="ramp"
+# A 的 RequestListener 会提示"你的请求收到报价";或手动列出报价拿 offer_id:
+$(dirname $DPY)/dimos mcp call list_offers --arg request_id=<id>
 $(dirname $DPY)/dimos mcp call fetch_and_run  --arg offer_id=<id>   # 沙箱驱动 Go2Primitives → 真机动作
 $(dirname $DPY)/dimos mcp call pay --arg offer_id=<id>
 $(dirname $DPY)/dimos stop
@@ -124,6 +127,7 @@ $(dirname $DPY)/dimos run injenium.agentic -d \
 | `market_state_path` | mock 账本文件(两狗共享) | `/shared/market_state.json` |
 | `agent_id` | 身份覆盖;空=按 ROBOT_IP 派生 | 一般留空 |
 | `marketskillcontainer.memory_db` | 蒸馏读取的录制库 | `/data/go2_recording.db` |
+| `marketskillcontainer.auto_publish` | 供给侧开关:开启后每完成任务自动挂牌出售 | `true` |
 | `marketskillcontainer.recipe_storage` | `local` / `ipfs` | 跨机用 `ipfs` |
 | `marketskillcontainer.ipfs_api_url` | Kubo API | `http://127.0.0.1:5001` |
 | `requestlistener.poll_interval` | 轮询秒数 | `5` |

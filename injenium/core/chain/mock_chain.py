@@ -30,6 +30,7 @@ import time
 import uuid
 
 from injenium.core.chain.base import (
+    Listing,
     Offer,
     OfferStatus,
     Rating,
@@ -269,6 +270,81 @@ class MockChain:
             self._write(state)
         return f"mock:rate:{offer_id}:{score}"
 
+    # -- skill listings (supply side) -----------------------------------------
+
+    def list_skill(
+        self,
+        description: str,
+        tags: list[str],
+        recipe_uri: str,
+        recipe_hash: str,
+        price: int,
+    ) -> str:
+        price = int(price)
+        # Mirror Market.sol::listSkill.
+        if price <= 0:
+            raise ValueError("price must be > 0")
+        with _FileLock(self._path):
+            state = self._read()
+            listing_id = f"lst-{uuid.uuid4().hex[:12]}"
+            listing = Listing(
+                id=listing_id,
+                seller=self._address,
+                description=description,
+                tags=list(tags),
+                recipe_uri=recipe_uri,
+                recipe_hash=recipe_hash,
+                price=price,
+                active=True,
+                created_ts=time.time(),
+            )
+            state.setdefault("listings", {})[listing_id] = listing.to_dict()
+            self._write(state)
+        return listing_id
+
+    def buy_skill(self, listing_id: str) -> str:
+        with _FileLock(self._path):
+            state = self._read()
+            listing = self._require_listing(state, listing_id)
+            # Mirror Market.sol: only an active listing can be bought; the
+            # price goes straight to the seller (multi-sale data good).
+            if not listing["active"]:
+                raise ValueError(f"listing {listing_id!r} is not active")
+            price = int(listing["price"])
+            self._ensure_funded(state, self._address, price)
+            self._ensure_account(state, listing["seller"])
+            state["balances"][self._address] -= price
+            state["balances"][listing["seller"]] += price
+            self._write(state)
+        return f"mock:buy:{listing_id}:{price}"
+
+    def delist_skill(self, listing_id: str) -> str:
+        with _FileLock(self._path):
+            state = self._read()
+            listing = self._require_listing(state, listing_id)
+            if self._address != listing["seller"]:
+                raise ValueError("only the seller can delist")
+            if not listing["active"]:
+                raise ValueError(f"listing {listing_id!r} already delisted")
+            listing["active"] = False
+            self._write(state)
+        return f"mock:delist:{listing_id}"
+
+    def list_active_listings(self) -> list[Listing]:
+        state = self._read()
+        return [
+            Listing.from_dict(entry)
+            for entry in state.get("listings", {}).values()
+            if entry["active"]
+        ]
+
+    def get_listing(self, listing_id: str) -> Listing:
+        state = self._read()
+        listings = state.get("listings", {})
+        if listing_id not in listings:
+            raise KeyError(f"unknown listing {listing_id!r}")
+        return Listing.from_dict(listings[listing_id])
+
     def balance_of(self, address: str) -> int:
         return int(self._read()["balances"].get(address, 0))
 
@@ -282,6 +358,12 @@ class MockChain:
         if offer_id not in state["offers"]:
             raise KeyError(f"unknown offer {offer_id!r}")
         return state["offers"][offer_id]
+
+    def _require_listing(self, state: dict, listing_id: str) -> dict:
+        listings = state.setdefault("listings", {})
+        if listing_id not in listings:
+            raise KeyError(f"unknown listing {listing_id!r}")
+        return listings[listing_id]
 
     def _ensure_account(self, state: dict, address: str) -> None:
         state["balances"].setdefault(address, 0)
@@ -301,6 +383,7 @@ class MockChain:
             "escrow": {},
             "requests": {},
             "offers": {},
+            "listings": {},
             "ratings": [],
         }
 

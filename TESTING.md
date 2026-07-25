@@ -109,7 +109,7 @@ python demo/demo_m5_onchain.py \
 
 ## 接口级验收(dimos mcp,无 LLM 驱动技能)
 
-`injenium.market` 已挂 `McpServer`,可用命令直接驱动 5 个 `@skill`(含只读自检 `chain_status`;可指向 mock 或测试网)。
+`injenium.market` 已挂 `McpServer`,可用命令直接驱动 11 个 `@skill`(只读自检/浏览 + 悬赏闭环 + 技能货架;可指向 mock 或测试网)。
 
 ```bash
 # 起 headless 市场服务(后台);指向测试网需给两个模块都配链
@@ -124,12 +124,19 @@ dimos run injenium.market -d \
   -o requestlistener.chain_id=1439 \
   -o requestlistener.rpc_url=https://k8s.testnet.json-rpc.injective.network/
 
-dimos mcp list-tools                                       # 列出 5 个市场技能(含 chain_status)
+dimos mcp list-tools                                       # 列出 11 个市场技能(自检/浏览 + 悬赏闭环 + 技能货架)
 dimos mcp call chain_status                                # 只读自检:钱包/余额/链是否可达(不花钱)
+dimos mcp call list_requests                               # 只读浏览:板上开放请求(不花钱)
 dimos mcp call publish_request --arg need="climb the ramp" --arg budget=0.1
 dimos mcp call distill_and_publish --arg request_id=1 --arg query="ramp"
+dimos mcp call list_offers --arg request_id=1              # 拿到 offer_id 再 fetch_and_run
 dimos mcp call fetch_and_run --arg offer_id=1
 dimos mcp call pay --arg offer_id=1
+# 技能货架(供给侧):
+dimos mcp call set_auto_publish --arg enabled=true         # 开关:完成任务后自动挂牌
+dimos mcp call publish_skill --arg description="climb the ramp" --arg price=0.05 --arg query="ramp"
+dimos mcp call search_skills --arg query="ramp"            # 拿到 listing_id
+dimos mcp call buy_and_run --arg listing_id=1              # 先验证后付款并执行
 dimos stop
 ```
 (不带链参数则跑 mock 账本;`ROBOT_IP`/`WALLET_SALT` 从环境继承派生钱包。)

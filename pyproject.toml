@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "injenium"
 version = "0.1.0"
-description = "Injenium (灵枢): an on-chain skill marketplace for embodied robots on Injective EVM, packaged as a dimOS blueprint."
+description = "Injenium (灵枢): an on-chain skill economy on Injective EVM — skills as the core, embodiments as pluggable domains (Unitree Go2 as the reference domain, packaged as dimOS blueprints)."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Injenium" }]
-keywords = ["injenium", "dimos", "injective", "evm", "robotics", "unitree", "go2", "skill-market"]
+keywords = ["injenium", "dimos", "injective", "evm", "skill-economy", "embodied-ai", "robotics", "unitree", "go2", "skill-market"]
 
 # NOTE: `dimos` itself is provided by the host runtime (the machine running the
 # robot agent). We depend on pydantic (already a dimos dependency) for the

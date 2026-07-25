@@ -122,6 +122,33 @@ class Rating:
         return cls(**d)
 
 
+@dataclass
+class Listing:
+    """A skill listed for direct sale (supply side).
+
+    A listing is a data good: it stays ``active`` and can be sold to many
+    buyers until the seller delists it. ``price`` is wei per purchase, paid
+    straight to the seller on ``buy_skill``.
+    """
+
+    id: str
+    seller: str
+    description: str
+    tags: list[str] = field(default_factory=list)
+    recipe_uri: str = ""
+    recipe_hash: str = ""
+    price: int = 0
+    active: bool = True
+    created_ts: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.__dict__.copy()
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Listing:
+        return cls(**d)
+
+
 @runtime_checkable
 class ChainClient(Protocol):
     """The market's on-chain surface, backed by mock or ``web3.py``.
@@ -186,6 +213,37 @@ class ChainClient(Protocol):
 
     def rate(self, offer_id: str, ratee: str, score: int) -> str:
         """Write a 1..5 rating for the counterparty of a settled offer. Returns tx ref."""
+        ...
+
+    def list_skill(
+        self,
+        description: str,
+        tags: list[str],
+        recipe_uri: str,
+        recipe_hash: str,
+        price: int,
+    ) -> str:
+        """List a distilled skill for direct sale. Returns the new listing id."""
+        ...
+
+    def buy_skill(self, listing_id: str) -> str:
+        """Pay an active listing's price straight to its seller. Returns a tx ref.
+
+        Callers hash-check + sandbox-validate the recipe **before** buying;
+        payment is settlement, not access control (mirrors ``Market.sol``).
+        """
+        ...
+
+    def delist_skill(self, listing_id: str) -> str:
+        """Take one's own listing off the board. Returns a tx ref."""
+        ...
+
+    def list_active_listings(self) -> list[Listing]:
+        """Return all listings currently active (buyable)."""
+        ...
+
+    def get_listing(self, listing_id: str) -> Listing:
+        """Fetch a single listing by id (raises ``KeyError`` if unknown)."""
         ...
 
     def balance_of(self, address: str) -> int:

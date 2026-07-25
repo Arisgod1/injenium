@@ -2,6 +2,11 @@
 
 记录首次把 Injenium 部署到 Injective EVM 测试网(chain-id 1439)的完整试错过程、结论、可复用资产与遗留问题。配套运行手册见 `TESTING.md`。
 
+## 第二次部署(含技能货架, 2026-07-25)
+- 合约（含 listSkill/buySkill/delistSkill）：`Market` @ `0x641549D4c1ea67E16c84c996065629Df0AA34399`，部署者 = 运行时钱包 `0x9e2C16dA0877cb2445fd43c9bd861bEFe0E86C57`（`ROBOT_IP=192.168.12.1` 空盐派生，faucet 1 INJ）。
+- 链上验证（状态读回，不依赖回执）：`listSkill` → `getListing`/`activeListingIds` 读回✓；`buySkill` eth_call 模拟通过 + 已广播（回执仍延迟，同遗留问题 #8）；`delistSkill` → active=false 读回✓；技能层 `chain_status`/`search_skills` 直连测试网✓。全程 gas ≈ 0.00006 INJ。
+- 注：旧合约 `0x7Eab…104E` 无挂牌功能，已弃用；`-o …market_contract` 一律指向新地址。
+
 ## TL;DR
 - ✅ **合约已真实部署到 Injective 测试网并可读**:`Market` @ `0x7Eab155DCae4Be8837678Af3ca96909b4141104E`(`eth_getCode` 返回字节码)。
 - ✅ **写路径已验证**:`publishRequest` 成功落链 —— `getRequest(1)` 读到 request #1(requester=部署者、budget=0.1 INJ、status=Open、need/tags 正确)。

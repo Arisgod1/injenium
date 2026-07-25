@@ -11,9 +11,11 @@
 This is where the "do we need a backend?" question is answered: **no**. Waiting
 for work is a resident :class:`~dimos.core.module.Module`, not a skill. On
 ``start`` it launches a background thread that polls the on-chain board every
-``poll_interval`` seconds; when an open request matches this dog's declared
-capabilities it nudges the agent through the same ``/human_input`` transport a
-human would use, and the LLM decides whether to call ``distill_and_publish``.
+``poll_interval`` seconds and nudges the agent through the same ``/human_input``
+transport a human would use, driving **both** sides of the loop: when another
+dog's open request matches this dog's declared capabilities the LLM is prompted
+to ``distill_and_publish``; and when one of *this* dog's own open requests
+receives an offer, the LLM is prompted to ``fetch_and_run`` then ``pay``.
 
 The skeleton mirrors :class:`dimos.memory2.module.Recorder` (a subscribe-style
 resident module) and reuses :class:`dimos.agents.web_human_input.WebInput`'s
@@ -31,7 +33,7 @@ from dimos.core.module import Module
 from dimos.core.transport_factory import make_transport
 from dimos.utils.logging_config import setup_logger
 
-from injenium.core.chain.base import ChainClient, Request, wei_to_inj
+from injenium.core.chain.base import ChainClient, Offer, Request, wei_to_inj
 from injenium.core.chain.factory import build_chain_client
 from injenium.core.config import RequestListenerConfig
 
@@ -42,7 +44,7 @@ _HUMAN_INPUT_TOPIC = "/human_input"
 
 
 class RequestListener(Module):
-    """Polls the market board and notifies the agent about answerable requests."""
+    """Polls the market board; notifies the agent about answerable requests and about offers on its own requests."""
 
     config: RequestListenerConfig
 
@@ -51,6 +53,7 @@ class RequestListener(Module):
         self._stop_event = Event()
         self._thread: Thread | None = None
         self._seen: set[str] = set()
+        self._seen_offers: set[str] = set()
         self._transport = None
         self._chain_client: ChainClient | None = None
 
@@ -91,12 +94,22 @@ class RequestListener(Module):
     def _poll_once(self) -> None:
         me = self._chain.address
         for request in self._chain.list_open_requests():
-            if request.requester == me or request.id in self._seen:
+            if request.requester == me:
+                # My own request: surface any offers that have come in.
+                self._poll_my_offers(request)
                 continue
-            if not self._matches(request):
+            if request.id in self._seen or not self._matches(request):
                 continue
             self._seen.add(request.id)
-            self._notify(request)
+            self._notify_request(request)
+
+    def _poll_my_offers(self, request: Request) -> None:
+        """Notify me when one of my own open requests receives a new offer."""
+        for offer in self._chain.list_offers(request.id):
+            if offer.id in self._seen_offers:
+                continue
+            self._seen_offers.add(offer.id)
+            self._notify_offer(request, offer)
 
     def _matches(self, request: Request) -> bool:
         """Answerable if no filters are set, or a tag/keyword matches the need."""
@@ -109,14 +122,25 @@ class RequestListener(Module):
         need = request.need.lower()
         return any(kw.lower() in need for kw in keywords)
 
-    def _notify(self, request: Request) -> None:
+    def _notify_request(self, request: Request) -> None:
         budget = wei_to_inj(request.budget)
-        message = (
+        logger.info("notifying agent about request %s", request.id)
+        self._publish(
             f"[market] An answerable request is open: id={request.id}, "
             f"budget={budget} INJ, need={request.need!r}. If you can help, call "
             f"distill_and_publish(request_id={request.id!r}, query=...)."
         )
-        logger.info("notifying agent about request %s", request.id)
+
+    def _notify_offer(self, request: Request, offer: Offer) -> None:
+        price = wei_to_inj(offer.price)
+        logger.info("notifying agent about offer %s on request %s", offer.id, request.id)
+        self._publish(
+            f"[market] Your request {request.id} ({request.need!r}) got an offer: "
+            f"offer_id={offer.id}, price={price} INJ, from {offer.responder}. Call "
+            f"fetch_and_run(offer_id={offer.id!r}); if it works, pay(offer_id={offer.id!r})."
+        )
+
+    def _publish(self, message: str) -> None:
         if self._transport is not None:
             try:
                 self._transport.publish(message)

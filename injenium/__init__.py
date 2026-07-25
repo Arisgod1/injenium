@@ -6,12 +6,14 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Injenium (灵枢) — on-chain skill market for embodied robots (PoC).
+"""Injenium (灵枢) — an on-chain skill economy: skills are the core, embodiments the extension (PoC).
 
-An external dimOS package that adds an on-chain skill marketplace to the Unitree
-Go2 agent. Public surface is intentionally small — everything the host runtime
-needs is reachable through the ``dimos.blueprints`` entry points defined in
-``pyproject.toml`` (``injenium.domains.go2.blueprint``).
+The domain-neutral market kernel lives in ``injenium.core`` (chain/contract,
+recipes, sandbox, identity, blueprint factory — no robot code). Each embodiment
+plugs in as a domain under ``injenium.domains.<domain>``; the Unitree Go2 robot
+dog is the first reference domain. Public surface is intentionally small —
+everything the host runtime needs is reachable through the ``dimos.blueprints``
+entry points defined in ``pyproject.toml`` (``injenium.domains.go2.blueprint``).
 """
 
 from __future__ import annotations

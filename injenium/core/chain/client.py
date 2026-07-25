@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from injenium.core.chain.base import (
+    Listing,
     Offer,
     OfferStatus,
     Request,
@@ -152,6 +153,66 @@ MARKET_ABI: list[dict[str, Any]] = [
             {"name": "price", "type": "uint256"},
             {"name": "status", "type": "uint8"},
             {"name": "createdTs", "type": "uint256"},
+        ],
+    },
+    {
+        "type": "function",
+        "name": "listSkill",
+        "stateMutability": "nonpayable",
+        "inputs": [
+            {"name": "description", "type": "string"},
+            {"name": "tags", "type": "string[]"},
+            {"name": "recipeUri", "type": "string"},
+            {"name": "recipeHash", "type": "bytes32"},
+            {"name": "price", "type": "uint256"},
+        ],
+        "outputs": [{"name": "id", "type": "uint256"}],
+    },
+    {
+        "type": "function",
+        "name": "buySkill",
+        "stateMutability": "payable",
+        "inputs": [{"name": "id", "type": "uint256"}],
+        "outputs": [],
+    },
+    {
+        "type": "function",
+        "name": "delistSkill",
+        "stateMutability": "nonpayable",
+        "inputs": [{"name": "id", "type": "uint256"}],
+        "outputs": [],
+    },
+    {
+        "type": "function",
+        "name": "activeListingIds",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256[]"}],
+    },
+    {
+        "type": "function",
+        "name": "getListing",
+        "stateMutability": "view",
+        "inputs": [{"name": "id", "type": "uint256"}],
+        "outputs": [
+            {"name": "seller", "type": "address"},
+            {"name": "description", "type": "string"},
+            {"name": "tags", "type": "string[]"},
+            {"name": "recipeUri", "type": "string"},
+            {"name": "recipeHash", "type": "bytes32"},
+            {"name": "price", "type": "uint256"},
+            {"name": "active", "type": "bool"},
+            {"name": "createdTs", "type": "uint256"},
+        ],
+    },
+    {
+        "type": "event",
+        "name": "SkillListed",
+        "anonymous": False,
+        "inputs": [
+            {"name": "id", "type": "uint256", "indexed": True},
+            {"name": "seller", "type": "address", "indexed": True},
+            {"name": "price", "type": "uint256", "indexed": False},
         ],
     },
 ]
@@ -318,6 +379,59 @@ class InjectiveClient:
         )
         return receipt["transactionHash"].hex()
 
+    # -- skill listings (supply side) -----------------------------------------
+
+    def list_skill(
+        self,
+        description: str,
+        tags: list[str],
+        recipe_uri: str,
+        recipe_hash: str,
+        price: int,
+    ) -> str:
+        receipt = self._send(
+            self._contract.functions.listSkill(
+                description,
+                list(tags),
+                recipe_uri,
+                self._to_bytes32(recipe_hash),
+                int(price),
+            )
+        )
+        return str(self._decode_id(receipt, "listSkill"))
+
+    def buy_skill(self, listing_id: str) -> str:
+        # Read the price on-chain so the exact msg.value requirement holds.
+        listing = self.get_listing(listing_id)
+        receipt = self._send(
+            self._contract.functions.buySkill(int(listing_id)), value=listing.price
+        )
+        return receipt["transactionHash"].hex()
+
+    def delist_skill(self, listing_id: str) -> str:
+        receipt = self._send(self._contract.functions.delistSkill(int(listing_id)))
+        return receipt["transactionHash"].hex()
+
+    def list_active_listings(self) -> list[Listing]:
+        ids = self._contract.functions.activeListingIds().call()
+        return [self.get_listing(str(i)) for i in ids]
+
+    def get_listing(self, listing_id: str) -> Listing:
+        raw = self._call_view(
+            self._contract.functions.getListing(int(listing_id)), "listing", listing_id
+        )
+        return Listing(
+            id=str(listing_id),
+            seller=str(raw[0]),
+            description=str(raw[1]),
+            tags=list(raw[2]),
+            recipe_uri=str(raw[3]),
+            recipe_hash=self._normalize_hash(raw[4]),
+            price=int(raw[5]),
+            active=bool(raw[6]),
+            created_ts=float(raw[7]),
+        )
+
     def balance_of(self, address: str) -> int:
         from web3 import Web3  # noqa: PLC0415
 
@@ -367,7 +481,11 @@ class InjectiveClient:
 
     def _decode_id(self, receipt: Any, fn_name: str) -> int:
         """Pull the emitted id out of the receipt's event logs."""
-        event_name = "RequestPublished" if fn_name == "publishRequest" else "OfferSubmitted"
+        event_name = {
+            "publishRequest": "RequestPublished",
+            "submitOffer": "OfferSubmitted",
+            "listSkill": "SkillListed",
+        }[fn_name]
         try:
             event = getattr(self._contract.events, event_name)()
             entries = event.process_receipt(receipt)

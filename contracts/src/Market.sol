@@ -2,9 +2,11 @@
 pragma solidity ^0.8.24;
 
 /// @title Injenium (灵枢) Skill Market
-/// @notice On-chain board for the robot-dog skill market (spec §6). Stores only
-///         pointers/hashes to off-chain recipes; matching and recipe bodies stay
-///         off-chain. Escrow is denominated in native INJ (msg.value, 18 dp).
+/// @notice On-chain board for the Injenium skill market (spec §6): demand-side
+///         requests/offers with escrow, plus supply-side skill listings sold
+///         directly. Stores only pointers/hashes to off-chain recipes; matching
+///         and recipe bodies stay off-chain. Amounts are native INJ
+///         (msg.value, 18 dp).
 /// @dev    The ABI here is mirrored by `injenium/chain/client.py::MARKET_ABI`
 ///         and the enum ordinals by its `_REQUEST_STATUS`/`_OFFER_STATUS` tables.
 contract Market {
@@ -40,9 +42,23 @@ contract Market {
         uint256 createdTs;
     }
 
+    /// @notice A skill listed for direct sale. Stays active until delisted, so
+    ///         one skill (a data good) can be sold to many buyers.
+    struct Listing {
+        address seller;
+        string description;
+        string[] tags;
+        string recipeUri;
+        bytes32 recipeHash;
+        uint256 price; // wei per purchase, paid straight to the seller
+        bool active;
+        uint256 createdTs;
+    }
+
     // Ids start at 1 so 0 is a clean "none" sentinel (matches client _NO_OFFER).
     uint256 public nextRequestId = 1;
     uint256 public nextOfferId = 1;
+    uint256 public nextListingId = 1;
 
     /// @notice Grace period after which an Answered-but-unsettled request may
     ///         be cancelled (mirrored by mock_chain._CANCEL_TIMEOUT_S).
@@ -52,6 +68,8 @@ contract Market {
     mapping(uint256 => Offer) private _offers;
     mapping(uint256 => uint256[]) private _offerIdsByRequest;
     uint256[] private _allRequestIds;
+    mapping(uint256 => Listing) private _listings;
+    uint256[] private _allListingIds;
 
     Rating[] public ratings;
 
@@ -61,6 +79,9 @@ contract Market {
     event PaymentReleased(uint256 indexed offerId, address indexed responder, uint256 amount);
     event RequestCancelled(uint256 indexed id, address indexed requester, uint256 refund);
     event Rated(uint256 indexed offerId, address indexed ratee, uint8 score);
+    event SkillListed(uint256 indexed id, address indexed seller, uint256 price);
+    event SkillPurchased(uint256 indexed id, address indexed buyer, uint256 price);
+    event SkillDelisted(uint256 indexed id);
 
     // -- requests -----------------------------------------------------------
 
@@ -178,6 +199,57 @@ contract Market {
         emit RequestCancelled(requestId, r.requester, amount);
     }
 
+    // -- skill listings (supply side) ----------------------------------------
+
+    /// @notice List a distilled skill for direct sale.
+    /// @dev    `tags` is `memory` for the same legacy-codegen reason as
+    ///         `publishRequest`. The listing stays active (multi-sale) until
+    ///         the seller delists it.
+    function listSkill(
+        string calldata description,
+        string[] memory tags,
+        string calldata recipeUri,
+        bytes32 recipeHash,
+        uint256 price
+    ) external returns (uint256 id) {
+        require(price > 0, "price must be > 0");
+        id = nextListingId++;
+        Listing storage l = _listings[id];
+        l.seller = msg.sender;
+        l.description = description;
+        l.tags = tags;
+        l.recipeUri = recipeUri;
+        l.recipeHash = recipeHash;
+        l.price = price;
+        l.active = true;
+        l.createdTs = block.timestamp;
+        _allListingIds.push(id);
+        emit SkillListed(id, msg.sender, price);
+    }
+
+    /// @notice Buy a listed skill: pay the exact price straight to the seller.
+    /// @dev    Buyers hash-check + sandbox-validate the recipe off-chain BEFORE
+    ///         calling this; payment is settlement, not access control.
+    function buySkill(uint256 id) external payable {
+        Listing storage l = _listings[id];
+        require(l.seller != address(0), "unknown listing");
+        require(l.active, "listing not active");
+        require(msg.value == l.price, "wrong price");
+        (bool ok, ) = payable(l.seller).call{value: msg.value}("");
+        require(ok, "transfer failed");
+        emit SkillPurchased(id, msg.sender, msg.value);
+    }
+
+    /// @notice Take one's own listing off the board.
+    function delistSkill(uint256 id) external {
+        Listing storage l = _listings[id];
+        require(l.seller != address(0), "unknown listing");
+        require(msg.sender == l.seller, "only seller");
+        require(l.active, "already delisted");
+        l.active = false;
+        emit SkillDelisted(id);
+    }
+
     // -- ratings ------------------------------------------------------------
 
     /// @notice Write a 1..5 rating for a counterparty of a settled offer.
@@ -223,6 +295,53 @@ contract Market {
 
     function offerIdsOf(uint256 requestId) external view returns (uint256[] memory) {
         return _offerIdsByRequest[requestId];
+    }
+
+    /// @notice All listing ids currently active (buyable).
+    function activeListingIds() external view returns (uint256[] memory) {
+        uint256 n = 0;
+        for (uint256 i = 0; i < _allListingIds.length; i++) {
+            if (_listings[_allListingIds[i]].active) {
+                n++;
+            }
+        }
+        uint256[] memory out = new uint256[](n);
+        uint256 j = 0;
+        for (uint256 i = 0; i < _allListingIds.length; i++) {
+            uint256 id = _allListingIds[i];
+            if (_listings[id].active) {
+                out[j++] = id;
+            }
+        }
+        return out;
+    }
+
+    function getListing(uint256 id)
+        external
+        view
+        returns (
+            address seller,
+            string memory description,
+            string[] memory tags,
+            string memory recipeUri,
+            bytes32 recipeHash,
+            uint256 price,
+            bool active,
+            uint256 createdTs
+        )
+    {
+        Listing storage l = _listings[id];
+        require(l.seller != address(0), "unknown listing");
+        return (
+            l.seller,
+            l.description,
+            l.tags,
+            l.recipeUri,
+            l.recipeHash,
+            l.price,
+            l.active,
+            l.createdTs
+        );
     }
 
     function getRequest(uint256 id)

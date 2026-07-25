@@ -13,8 +13,11 @@ LLM calls to drive the closed loop:
 
     publish_request  -> distill_and_publish -> fetch_and_run -> pay
 
-plus a read-only ``chain_status`` self-check so the agent can answer "can you
-go on-chain?" without spending anything.
+plus read-only ``chain_status`` / ``list_requests`` / ``list_offers`` /
+``search_skills`` for self-check and browsing, and a supply side: a
+``set_auto_publish`` switch, ``publish_skill`` to list a distilled skill for
+direct sale, and ``buy_and_run`` to purchase and execute a listing
+(validate-then-pay, mirroring ``fetch_and_run``).
 
 Each skill obeys the dimOS skill contract (docstring + fully typed args + ``str``
 return) so it shows up in ``dimos mcp list-tools`` and is callable via
@@ -66,6 +69,12 @@ class MarketSkillContainer(Module):
             self._chain_client = client
         return client
 
+    @property
+    def _auto_publish_enabled(self) -> bool:
+        # Runtime switch; falls back to the configured default until toggled.
+        state = getattr(self, "_auto_publish", None)
+        return bool(self.config.auto_publish) if state is None else bool(state)
+
     @rpc
     def start(self) -> None:
         super().start()
@@ -107,20 +116,206 @@ class MarketSkillContainer(Module):
                 f"{cfg.rpc_url}."
             )
 
+        auto = "ON" if self._auto_publish_enabled else "OFF"
         if backend == "mock":
             logger.info("chain_status: mock ledger ok for %s", address)
             return (
                 f"On-chain check: backend=mock (local file ledger at "
                 f"{cfg.market_state_path}, no network needed). Wallet {address} "
                 f"holds {balance} INJ (auto-funded on first request). I can run "
-                f"the full market loop off-chain."
+                f"the full market loop off-chain. Auto-publish is {auto}."
             )
 
         logger.info("chain_status: injective reachable for %s", address)
         return (
             f"On-chain check: backend=injective, chain_id={cfg.chain_id}, "
             f"contract={cfg.market_contract}. Wallet {address} is reachable on "
-            f"{cfg.rpc_url} and holds {balance} INJ. Ready to transact on-chain."
+            f"{cfg.rpc_url} and holds {balance} INJ. Ready to transact on-chain. "
+            f"Auto-publish is {auto}."
+        )
+
+    @skill
+    def list_requests(self) -> str:
+        """List the open requests currently on the market board.
+
+        Read-only browse for "what tasks are open on-chain?" / "what can I
+        answer?". Shows each open request's id, need, escrow budget and
+        requester (yours are marked). Pick a ``request_id`` here to answer with
+        ``distill_and_publish``. Spends nothing.
+
+        Returns:
+            A human-readable list of open requests, or a note that there are
+            none.
+        """
+        try:
+            requests = self._chain.list_open_requests()
+        except Exception as exc:  # self-check must never crash the agent
+            return f"Could not read the market board: {exc}"
+        if not requests:
+            return "No open requests on the market right now."
+        me = self._chain.address
+        lines = [f"Open requests on the market ({len(requests)}):"]
+        for r in requests:
+            mine = " (yours)" if r.requester == me else ""
+            tags = f", tags={r.tags}" if r.tags else ""
+            lines.append(
+                f"- {r.id}: {r.need!r} — {wei_to_inj(r.budget)} INJ — "
+                f"by {r.requester}{mine}{tags}"
+            )
+        return "\n".join(lines)
+
+    @skill
+    def list_offers(self, request_id: str) -> str:
+        """List the offers submitted against a request.
+
+        Read-only browse for "did anyone answer my request?" / "which offers can
+        I run?". Shows each offer's id, responder, price, recipe hash and
+        status. After ``publish_request``, poll this to find an ``offer_id`` to
+        hand to ``fetch_and_run``. Spends nothing.
+
+        Args:
+            request_id: The request to list offers for (e.g. the id returned by
+                ``publish_request``).
+
+        Returns:
+            A human-readable list of offers, or a note that there are none.
+        """
+        try:
+            offers = self._chain.list_offers(request_id)
+        except Exception as exc:  # bad id / backend hiccup must not crash the agent
+            return f"Could not read offers for request {request_id!r}: {exc}"
+        if not offers:
+            return (
+                f"No offers for request {request_id} yet. Another dog answers by "
+                f"calling distill_and_publish; check again shortly."
+            )
+        lines = [f"Offers for request {request_id} ({len(offers)}):"]
+        for o in offers:
+            lines.append(
+                f"- {o.id}: {wei_to_inj(o.price)} INJ — by {o.responder} — "
+                f"recipe 0x{o.recipe_hash[:12]}… — status={o.status.value} — "
+                f"run with fetch_and_run(offer_id={o.id!r})"
+            )
+        return "\n".join(lines)
+
+    @skill
+    def search_skills(self, query: str) -> str:
+        """Search the on-chain skill board for listings matching a query.
+
+        Read-only browse of the supply side: matches ``query`` words against
+        each active listing's description and tags (case-insensitive; empty
+        query lists everything). When you are stuck, search here **first** —
+        buying an existing skill with ``buy_and_run`` is faster and cheaper
+        than posting a bounty with ``publish_request``. Spends nothing.
+
+        Args:
+            query: Keywords describing the skill you need (e.g. ``"backflip"``).
+
+        Returns:
+            Matching listings with id, description, price and seller, or a
+            note that nothing matched.
+        """
+        try:
+            listings = self._chain.list_active_listings()
+        except Exception as exc:  # browse must never crash the agent
+            return f"Could not read the skill board: {exc}"
+        tokens = [t for t in query.lower().split() if t]
+        if tokens:
+            listings = [
+                listing
+                for listing in listings
+                if any(
+                    token in (listing.description + " " + " ".join(listing.tags)).lower()
+                    for token in tokens
+                )
+            ]
+        if not listings:
+            return (
+                f"No skill listings match {query!r}. You can post a bounty "
+                f"instead with publish_request(need=..., budget=...)."
+            )
+        lines = [f"Skill listings matching {query!r} ({len(listings)}):"]
+        for listing in listings:
+            lines.append(
+                f"- {listing.id}: {listing.description!r} — "
+                f"{wei_to_inj(listing.price)} INJ — by {listing.seller} — "
+                f"buy with buy_and_run(listing_id={listing.id!r})"
+            )
+        return "\n".join(lines)
+
+    @skill
+    def set_auto_publish(self, enabled: bool) -> str:
+        """Turn the auto-publish switch on or off.
+
+        The switch opts this robot into the supply side of the skill economy.
+        While it is ON, after you successfully complete a task you should call
+        ``publish_skill(description=..., price=..., query=...)`` to distill and
+        list that experience on-chain so other robots can find and buy it.
+        Turning it OFF stops the automatic listing behaviour; manual
+        ``publish_skill`` still works.
+
+        Args:
+            enabled: ``true`` to enable auto-publishing, ``false`` to disable.
+
+        Returns:
+            The new switch state and a reminder of the expected behaviour.
+        """
+        self._auto_publish = bool(enabled)
+        logger.info("auto-publish switched %s", "ON" if enabled else "OFF")
+        if self._auto_publish:
+            return (
+                "Auto-publish is now ON: after each task you complete "
+                "successfully, call publish_skill(description=..., price=..., "
+                "query=...) to list the experience on-chain (price modestly, "
+                "e.g. 0.05 INJ)."
+            )
+        return (
+            "Auto-publish is now OFF: skills are only listed when you call "
+            "publish_skill explicitly."
+        )
+
+    @skill
+    def publish_skill(self, description: str, price: float, query: str) -> str:
+        """Distill a completed task from memory and list it for sale on-chain.
+
+        The supply side of the market: turns recorded experience into a
+        de-privatised, parameterized recipe and puts it on the skill board at
+        ``price`` INJ per purchase (a listing can sell many times). Other
+        robots find it with ``search_skills`` and buy it with ``buy_and_run``.
+        Call this after completing a task when auto-publish is ON, or whenever
+        asked to sell a skill.
+
+        Args:
+            description: What the skill does, as buyers will see it
+                (e.g. ``"climb a 20cm ramp"``).
+            price: Sale price in INJ per purchase (e.g. ``0.05``).
+            query: Text used to pick the recorded experience to distil
+                (semantic frame selection, like ``distill_and_publish``).
+
+        Returns:
+            A confirmation including the new listing id.
+        """
+        recipe, recipe_uri = get_default_distiller().distill(
+            intent=description,
+            source=self.config.memory_db,
+            artifacts_dir=self.config.artifacts_dir,
+            query=query,
+            success_criteria=description,
+            storage=self.config.recipe_storage,
+            ipfs_api_url=self.config.ipfs_api_url,
+        )
+        listing_id = self._chain.list_skill(
+            description=description,
+            tags=[],
+            recipe_uri=recipe_uri,
+            recipe_hash=recipe.content_hash(),
+            price=inj_to_wei(price),
+        )
+        logger.info("listed skill %s (%s INJ)", listing_id, price)
+        return (
+            f"Listed skill {listing_id}: {description!r} at {price} INJ "
+            f"({len(recipe.steps)} steps). Other robots can now find it with "
+            f"search_skills and buy it with buy_and_run."
         )
 
     @skill
@@ -236,6 +431,61 @@ class MarketSkillContainer(Module):
         logger.info("ran offer %s -> ok=%s", offer_id, report.ok)
         outcome = "succeeded" if report.ok else "FAILED"
         return f"Offer {offer_id} recipe {outcome}.\n{report.summary()}"
+
+    @skill
+    def buy_and_run(self, listing_id: str) -> str:
+        """Buy a listed skill and run its recipe in the sandbox.
+
+        Verifies **before** paying: loads the listing's recipe, checks its
+        content hash against the on-chain commitment, and sandbox-validates
+        every step. Only when everything passes is the price paid (straight to
+        the seller) and the recipe executed against the local primitives — the
+        recipe is never imported or evaluated as code. On any refusal nothing
+        is paid.
+
+        Args:
+            listing_id: The id of the listing to buy (from ``search_skills``).
+
+        Returns:
+            A purchase confirmation plus the per-step execution report, or the
+            reason the listing was refused.
+        """
+        listing = self._chain.get_listing(listing_id)
+        if not listing.active:
+            return f"Refused listing {listing_id}: it is no longer active. Nothing was paid."
+        try:
+            recipe = load_recipe(listing.recipe_uri)
+        except (OSError, ValueError) as exc:
+            return (
+                f"Refused listing {listing_id}: could not load recipe from "
+                f"{listing.recipe_uri!r}: {exc}. Nothing was paid."
+            )
+
+        actual = recipe.content_hash()
+        if actual != listing.recipe_hash:
+            return (
+                f"Refused listing {listing_id}: recipe hash mismatch "
+                f"(listing 0x{listing.recipe_hash[:12]}… vs file 0x{actual[:12]}…). "
+                f"Nothing was paid."
+            )
+
+        interpreter = SandboxInterpreter(self._primitives)
+        problems = interpreter.validate(recipe)
+        if problems:
+            return (
+                f"Refused listing {listing_id}: recipe failed validation: "
+                f"{'; '.join(problems)}. Nothing was paid."
+            )
+
+        tx_ref = self._chain.buy_skill(listing_id)
+        report = interpreter.run(recipe)
+        price = wei_to_inj(listing.price)
+        logger.info("bought listing %s for %s INJ -> ok=%s", listing_id, price, report.ok)
+        outcome = "succeeded" if report.ok else "FAILED"
+        return (
+            f"Bought listing {listing_id} for {price} INJ (tx {tx_ref}); recipe "
+            f"{outcome}.\n{report.summary()}"
+        )
 
     @skill
     def pay(self, offer_id: str) -> str:

@@ -28,3 +28,6 @@ contracts/lib/
 
 # OS
 .DS_Store
+
+# Agent wallet exports (contain private keys — never commit)
+agent-wallets-*.csv
