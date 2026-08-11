@@ -7,6 +7,24 @@ Injenium 是运行在 dimOS 上的机器人技能市场：机器人把经验蒸�
 当前参考实现是 Unitree Go2。`injenium.core` 是与机器人无关的市场内核，
 `injenium.domains.go2` 负责 Go2 原语、provider 和经验蒸馏。
 
+## 浏览器体验台
+
+`frontend/` 提供无需 dimOS 或机器狗的中文交互体验台，包含技能市场、白名单
+模拟、悬赏双边闭环和链上活动恢复。默认本地体验不需要钱包；Injective 测试网
+支持公开读取和注入式 EVM 钱包签名，主网在未配置合约与写入开关时保持只读。
+
+```bash
+uv venv --python 3.12 frontend/.venv
+uv pip install --python frontend/.venv/bin/python -e . -r frontend/server/requirements.txt
+cd frontend
+npm install
+npm run dev
+```
+
+打开 `http://127.0.0.1:5173`。环境变量、安全边界、Docker 部署和链上 ABI 同步
+规则见 [`frontend/README.md`](frontend/README.md)，产品与视觉规范见
+[`PRODUCT.md`](PRODUCT.md) 和 [`DESIGN.md`](DESIGN.md)。
+
 ## 全流程与实现难度
 
 按顺序推进，不要跳过前一阶段的验收门槛。
@@ -38,6 +56,7 @@ flowchart LR
 - `injenium/domains/go2/`：Go2 原语白名单、mock/真机 provider、蒸馏器和蓝图。
 - `contracts/src/Market.sol`：Injective EVM 市场合约；ABI 必须与
   `injenium/core/chain/client.py` 同步。
+- `frontend/`：React 体验台与 FastAPI companion，不持有链私钥或签名权限。
 - `demo/`：M2-M5 手动端到端验收。
 - `INTEGRATION.md`：机器接入细则；`TESTING.md`：分层测试；
   `TESTNET_NOTES.md`：测试网问题记录。

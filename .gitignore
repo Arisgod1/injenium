@@ -31,5 +31,13 @@ contracts/lib/
 # OS
 .DS_Store
 
+# Web experience
+frontend/node_modules/
+frontend/dist/
+frontend/.runtime/
+frontend/playwright-report/
+frontend/test-results/
+frontend/*.tsbuildinfo
+
 # Agent wallet exports (contain private keys — never commit)
 agent-wallets-*.csv

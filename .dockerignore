@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+**/.env
+**/.venv
+**/__pycache__
+**/*.pyc
+frontend/node_modules
+frontend/dist
+frontend/playwright-report
+frontend/test-results
+frontend/*.tsbuildinfo
+contracts/cache
+contracts/out
+contracts/lib
+demo_artifacts
+injenium_artifacts
