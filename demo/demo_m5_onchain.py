@@ -78,7 +78,7 @@ def main() -> None:
     )
     p.add_argument("--key-a", default=os.environ.get("A_KEY", ANVIL_KEY_A))
     p.add_argument("--key-b", default=os.environ.get("B_KEY", ANVIL_KEY_B))
-    p.add_argument("--budget", type=float, default=0.1, help="escrow bounty (native coin)")
+    p.add_argument("--budget", default="0.1", help="decimal escrow bounty (native coin)")
     args = p.parse_args()
 
     if not args.contract:

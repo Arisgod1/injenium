@@ -33,10 +33,32 @@ from injenium.core.chain.base import (
 )
 from injenium.core.config import INJECTIVE_MAINNET_CHAIN_ID
 from injenium.core.identity import resolve_signing_key
+from injenium.core.chain.tx_manager import TxManager, TxResult
 
 # Minimal ABI mirroring contracts/src/Market.sol. Kept here (not read from a
 # build artifact) so the client works from a bare `pip install` without Foundry.
 MARKET_ABI: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "name": "nextRequestId",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "type": "function",
+        "name": "nextOfferId",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "type": "function",
+        "name": "nextListingId",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
     {
         "type": "function",
         "name": "publishRequest",
@@ -251,6 +273,12 @@ class InjectiveClient:
         contract_address: str,
         chain_id: int,
         private_key: str | None = None,
+        receipt_timeout: float = 180.0,
+        poll_interval: float = 2.0,
+        broadcast_attempts: int = 3,
+        confirmations: int = 1,
+        pending_store_path: str | None = "injenium_artifacts/pending_txs.json",
+        recovery_scan_blocks: int = 2048,
     ) -> None:
         try:
             from web3 import Web3  # noqa: PLC0415 -- optional dependency
@@ -290,6 +318,25 @@ class InjectiveClient:
             address=Web3.to_checksum_address(contract_address),
             abi=MARKET_ABI,
         )
+        self._tx_manager = TxManager(
+            self._w3,
+            self._account,
+            self._chain_id,
+            receipt_timeout=receipt_timeout,
+            poll_interval=poll_interval,
+            broadcast_attempts=broadcast_attempts,
+            confirmations=confirmations,
+            pending_store_path=pending_store_path,
+            recovery_scan_blocks=recovery_scan_blocks,
+        )
+
+    def recover_pending_transactions(self) -> TxResult | None:
+        """Recover this wallet's persisted in-flight transaction, if any."""
+        return self._tx_manager.recover_pending()
+
+    def pending_transaction(self) -> Any | None:
+        """Return persisted in-flight transaction metadata without an RPC call."""
+        return self._tx_manager.pending()
 
     # -- ChainClient surface -------------------------------------------------
 
@@ -318,11 +365,19 @@ class InjectiveClient:
         )
 
     def publish_request(self, need: str, budget: int, tags: list[str]) -> str:
-        receipt = self._send(
+        first_id = int(self._contract.functions.nextRequestId().call())
+        result = self._send(
             self._contract.functions.publishRequest(need, list(tags)),
             value=int(budget),
         )
-        return str(self._decode_id(receipt, "publishRequest"))
+        return str(
+            self._decode_id(
+                result,
+                "publishRequest",
+                first_id,
+                lambda ident: self._request_matches(ident, need, budget, tags),
+            )
+        )
 
     def list_offers(self, request_id: str) -> list[Offer]:
         ids = self._contract.functions.offerIdsOf(int(request_id)).call()
@@ -347,7 +402,8 @@ class InjectiveClient:
     def submit_offer(
         self, request_id: str, recipe_uri: str, recipe_hash: str, price: int
     ) -> str:
-        receipt = self._send(
+        first_id = int(self._contract.functions.nextOfferId().call())
+        result = self._send(
             self._contract.functions.submitOffer(
                 int(request_id),
                 recipe_uri,
@@ -355,19 +411,28 @@ class InjectiveClient:
                 int(price),
             )
         )
-        return str(self._decode_id(receipt, "submitOffer"))
+        return str(
+            self._decode_id(
+                result,
+                "submitOffer",
+                first_id,
+                lambda ident: self._offer_matches(
+                    ident, request_id, recipe_uri, recipe_hash, price
+                ),
+            )
+        )
 
     def accept_offer(self, offer_id: str) -> str:
-        receipt = self._send(self._contract.functions.acceptOffer(int(offer_id)))
-        return receipt["transactionHash"].hex()
+        result = self._send(self._contract.functions.acceptOffer(int(offer_id)))
+        return result.transaction_hash
 
     def release_payment(self, offer_id: str) -> str:
-        receipt = self._send(self._contract.functions.releasePayment(int(offer_id)))
-        return receipt["transactionHash"].hex()
+        result = self._send(self._contract.functions.releasePayment(int(offer_id)))
+        return result.transaction_hash
 
     def cancel_request(self, request_id: str) -> str:
-        receipt = self._send(self._contract.functions.cancelRequest(int(request_id)))
-        return receipt["transactionHash"].hex()
+        result = self._send(self._contract.functions.cancelRequest(int(request_id)))
+        return result.transaction_hash
 
     def rate(self, offer_id: str, ratee: str, score: int) -> str:
         from web3 import Web3  # noqa: PLC0415
@@ -377,7 +442,7 @@ class InjectiveClient:
                 int(offer_id), Web3.to_checksum_address(ratee), int(score)
             )
         )
-        return receipt["transactionHash"].hex()
+        return receipt.transaction_hash
 
     # -- skill listings (supply side) -----------------------------------------
 
@@ -389,7 +454,8 @@ class InjectiveClient:
         recipe_hash: str,
         price: int,
     ) -> str:
-        receipt = self._send(
+        first_id = int(self._contract.functions.nextListingId().call())
+        result = self._send(
             self._contract.functions.listSkill(
                 description,
                 list(tags),
@@ -398,7 +464,16 @@ class InjectiveClient:
                 int(price),
             )
         )
-        return str(self._decode_id(receipt, "listSkill"))
+        return str(
+            self._decode_id(
+                result,
+                "listSkill",
+                first_id,
+                lambda ident: self._listing_matches(
+                    ident, description, tags, recipe_uri, recipe_hash, price
+                ),
+            )
+        )
 
     def buy_skill(self, listing_id: str) -> str:
         # Read the price on-chain so the exact msg.value requirement holds.
@@ -406,11 +481,11 @@ class InjectiveClient:
         receipt = self._send(
             self._contract.functions.buySkill(int(listing_id)), value=listing.price
         )
-        return receipt["transactionHash"].hex()
+        return receipt.transaction_hash
 
     def delist_skill(self, listing_id: str) -> str:
-        receipt = self._send(self._contract.functions.delistSkill(int(listing_id)))
-        return receipt["transactionHash"].hex()
+        result = self._send(self._contract.functions.delistSkill(int(listing_id)))
+        return result.transaction_hash
 
     def list_active_listings(self) -> list[Listing]:
         ids = self._contract.functions.activeListingIds().call()
@@ -439,19 +514,8 @@ class InjectiveClient:
 
     # -- tx plumbing ---------------------------------------------------------
 
-    def _send(self, fn: Any, value: int = 0) -> Any:
-        tx = fn.build_transaction(
-            {
-                "chainId": self._chain_id,
-                "from": self._account.address,
-                "nonce": self._w3.eth.get_transaction_count(self._account.address),
-                "value": int(value),
-                "gasPrice": self._w3.eth.gas_price,
-            }
-        )
-        signed = self._account.sign_transaction(tx)
-        tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
-        return self._w3.eth.wait_for_transaction_receipt(tx_hash)
+    def _send(self, fn: Any, value: int = 0) -> TxResult:
+        return self._tx_manager.send(fn, value=value)
 
     @staticmethod
     def _call_view(fn: Any, kind: str, ident: str) -> Any:
@@ -479,8 +543,14 @@ class InjectiveClient:
         text = str(value)
         return text[2:].lower() if text.startswith("0x") else text.lower()
 
-    def _decode_id(self, receipt: Any, fn_name: str) -> int:
-        """Pull the emitted id out of the receipt's event logs."""
+    def _decode_id(
+        self,
+        result: TxResult,
+        fn_name: str,
+        first_id: int,
+        matches: Any,
+    ) -> int:
+        """Resolve a created id from receipt logs, block logs, or chain state."""
         event_name = {
             "publishRequest": "RequestPublished",
             "submitOffer": "OfferSubmitted",
@@ -488,14 +558,91 @@ class InjectiveClient:
         }[fn_name]
         try:
             event = getattr(self._contract.events, event_name)()
-            entries = event.process_receipt(receipt)
+            entries = (
+                event.process_receipt(result.receipt)
+                if result.receipt is not None
+                else []
+            )
             if entries:
                 return int(entries[0]["args"]["id"])
         except Exception:  # pragma: no cover - ABI/log shape drift
             pass
-        # Fallback: contracts also return the id, but that's unavailable from a
-        # mined tx; callers should prefer reading the emitted event.
+
+        if result.block_number is not None:
+            try:
+                entries = event.get_logs(
+                    from_block=result.block_number,
+                    to_block=result.block_number,
+                )
+                for entry in entries:
+                    if self._normalize_hash(entry["transactionHash"]) == self._normalize_hash(
+                        result.transaction_hash
+                    ):
+                        return int(entry["args"]["id"])
+            except Exception:  # pragma: no cover - provider log-index behavior
+                pass
+
+        counter_name = {
+            "publishRequest": "nextRequestId",
+            "submitOffer": "nextOfferId",
+            "listSkill": "nextListingId",
+        }[fn_name]
+        next_id = int(getattr(self._contract.functions, counter_name)().call())
+        candidates = [ident for ident in range(first_id, next_id) if matches(ident)]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise RuntimeError(
+                f"ambiguous id recovery for {fn_name}: matching ids {candidates}"
+            )
         raise RuntimeError(f"could not decode id from {fn_name} receipt")
+
+    def _request_matches(
+        self, ident: int, need: str, budget: int, tags: list[str]
+    ) -> bool:
+        raw = self._contract.functions.getRequest(ident).call()
+        return (
+            str(raw[0]).lower() == self.address.lower()
+            and str(raw[1]) == need
+            and int(raw[2]) == int(budget)
+            and list(raw[3]) == list(tags)
+        )
+
+    def _offer_matches(
+        self,
+        ident: int,
+        request_id: str,
+        recipe_uri: str,
+        recipe_hash: str,
+        price: int,
+    ) -> bool:
+        raw = self._contract.functions.getOffer(ident).call()
+        return (
+            int(raw[0]) == int(request_id)
+            and str(raw[1]).lower() == self.address.lower()
+            and str(raw[2]) == recipe_uri
+            and self._normalize_hash(raw[3]) == self._normalize_hash(recipe_hash)
+            and int(raw[4]) == int(price)
+        )
+
+    def _listing_matches(
+        self,
+        ident: int,
+        description: str,
+        tags: list[str],
+        recipe_uri: str,
+        recipe_hash: str,
+        price: int,
+    ) -> bool:
+        raw = self._contract.functions.getListing(ident).call()
+        return (
+            str(raw[0]).lower() == self.address.lower()
+            and str(raw[1]) == description
+            and list(raw[2]) == list(tags)
+            and str(raw[3]) == recipe_uri
+            and self._normalize_hash(raw[4]) == self._normalize_hash(recipe_hash)
+            and int(raw[5]) == int(price)
+        )
 
     @staticmethod
     def _to_bytes32(hex_hash: str) -> bytes:

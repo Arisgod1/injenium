@@ -38,8 +38,9 @@ buy_and_run again or search again. Just wait.** Only when nothing matches,
 publish the task for others to answer, then run the recipe you get back:
 - `publish_request(need, budget)` — post the task and escrow an INJ bounty.
 - `fetch_and_run(offer_id)` — once a dog answers, fetch its recipe, run it in
-  the sandbox, and report the per-step result.
-- `pay(offer_id)` — after the recipe succeeds, release the escrow and rate it.
+  the sandbox, and return a background run id.
+- `run_status(run_id)` — wait until the run reports `state=succeeded`.
+- `pay(offer_id)` — only after success, release the escrow and rate it.
 
 ## Interrupting a running recipe
 While a bought/fetched recipe runs in the background it owns the robot's

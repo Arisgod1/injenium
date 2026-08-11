@@ -86,7 +86,7 @@ def _make_recipe(db: Path | None, need: str, artifacts_dir: str) -> tuple[Recipe
 def main() -> None:
     parser = argparse.ArgumentParser(description="M4 mock closed-loop demo")
     parser.add_argument("--db", default=None, help="optional recorded memory2 store")
-    parser.add_argument("--budget", type=float, default=2.5, help="escrow bounty in INJ")
+    parser.add_argument("--budget", default="2.5", help="decimal escrow bounty in INJ")
     args = parser.parse_args()
 
     workdir = Path(tempfile.mkdtemp(prefix="go2inj_m4_"))

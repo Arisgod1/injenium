@@ -8,12 +8,12 @@
 #       --private-key $INJECTIVE_PRIVATE_KEY \
 #       --broadcast \
 #       --verify --verifier blockscout \
-#       --verifier-url https://testnet.blockscout.injective.network/api
+#       --verifier-url https://testnet.blockscout-api.injective.network/api
 #
 # Then point the agent at it:
 #   dimos run injenium.market \
-#       -o marketskillcontainer.chain_backend=injective \
-#       -o marketskillcontainer.market_contract=0x<deployed address>
+#       --marketskillcontainer.chain-backend injective \
+#       --marketskillcontainer.market-contract 0x<deployed address>
 
 [profile.default]
 src = "src"
@@ -30,5 +30,5 @@ injectiveMainnet = "https://sentry.evm-rpc.injective.network/"
 
 # Blockscout verification endpoints (no API key required for the testnet).
 [etherscan]
-injectiveTestnet = { key = "", url = "https://testnet.blockscout.injective.network/api", chain = 1439 }
-injectiveMainnet = { key = "", url = "https://blockscout.injective.network/api", chain = 1776 }
+injectiveTestnet = { key = "", url = "https://testnet.blockscout-api.injective.network/api", chain = 1439 }
+injectiveMainnet = { key = "", url = "https://blockscout-api.injective.network/api", chain = 1776 }

@@ -13,27 +13,48 @@ must both honour, so the closed loop that runs against the mock can be replayed
 verbatim against the Injective testnet (spec: "链接口" acceptance).
 
 Money is denominated in the smallest unit (``wei``, 18 decimals for INJ) as an
-``int`` everywhere, to avoid float rounding on the escrow path. The market
-skills accept a human ``float`` budget and convert at the edge.
+``int`` everywhere, to avoid float rounding on the escrow path. Human-facing
+amounts are parsed as decimal text and converted exactly at the edge.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
 INJ_DECIMALS = 18
+INJ_SCALE = 10**INJ_DECIMALS
 
 
-def inj_to_wei(amount: float) -> int:
-    """Convert a human INJ amount to integer wei (18 decimals)."""
-    return int(round(float(amount) * (10**INJ_DECIMALS)))
+def inj_to_wei(amount: Decimal | str | int | float) -> int:
+    """Convert an INJ amount to wei without binary floating-point arithmetic.
+
+    Decimal strings are preferred at human/API boundaries. ``float`` remains
+    accepted for compatibility and is first converted through its shortest
+    decimal representation. Amounts finer than one wei are rejected rather
+    than silently rounded.
+    """
+    if isinstance(amount, bool):
+        raise ValueError("INJ amount must be a decimal number")
+    try:
+        decimal_amount = (
+            amount if isinstance(amount, Decimal) else Decimal(str(amount))
+        )
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"invalid INJ amount {amount!r}") from exc
+    if not decimal_amount.is_finite():
+        raise ValueError("INJ amount must be finite")
+    wei = decimal_amount * INJ_SCALE
+    if wei != wei.to_integral_value():
+        raise ValueError(f"INJ amount supports at most {INJ_DECIMALS} decimal places")
+    return int(wei)
 
 
-def wei_to_inj(amount: int) -> float:
-    """Convert integer wei back to a human INJ amount."""
-    return int(amount) / (10**INJ_DECIMALS)
+def wei_to_inj(amount: int) -> Decimal:
+    """Convert integer wei back to an exact decimal INJ amount."""
+    return Decimal(int(amount)) / INJ_SCALE
 
 
 class RequestStatus(str, Enum):

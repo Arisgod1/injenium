@@ -17,8 +17,8 @@ plus read-only ``chain_status`` / ``list_requests`` / ``list_offers`` /
 ``search_skills`` for self-check and browsing, a supply side: a
 ``set_auto_publish`` switch, ``publish_skill`` to list a distilled skill for
 direct sale, and ``buy_and_run`` to purchase and execute a listing
-(validate-then-pay, mirroring ``fetch_and_run``) — and ``stop_run`` to abort a
-background recipe cooperatively.
+(validate-then-pay, mirroring ``fetch_and_run``) — plus ``run_status`` and
+``stop_run`` to observe or abort a background recipe cooperatively.
 
 Each skill obeys the dimOS skill contract (docstring + fully typed args + ``str``
 return) so it shows up in ``dimos mcp list-tools`` and is callable via
@@ -32,6 +32,8 @@ imported or ``eval``'d.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from enum import Enum
 import threading
 
 from dimos.agents.annotation import skill
@@ -39,7 +41,7 @@ from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.utils.logging_config import setup_logger
 
-from injenium.core.chain.base import ChainClient, inj_to_wei, wei_to_inj
+from injenium.core.chain.base import ChainClient, OfferStatus, inj_to_wei, wei_to_inj
 from injenium.core.chain.factory import build_chain_client
 from injenium.core.config import MarketConfig
 from injenium.core.distill import get_default_distiller
@@ -49,6 +51,27 @@ from injenium.core.sandbox import SandboxInterpreter
 from injenium.core.specs import PrimitiveSkillsSpec
 
 logger = setup_logger()
+
+
+class RunPhase(str, Enum):
+    """Local execution state used to gate escrow settlement."""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    ABORTED = "aborted"
+    SETTLED = "settled"
+
+
+@dataclass
+class RunRecord:
+    """State retained for one background offer or listing execution."""
+
+    run_id: str
+    phase: RunPhase = RunPhase.RUNNING
+    abort: threading.Event = field(default_factory=threading.Event)
+    summary: str = ""
+    payment_tx: str | None = None
 
 
 class MarketSkillContainer(Module):
@@ -64,17 +87,28 @@ class MarketSkillContainer(Module):
 
     _primitives: PrimitiveSkillsSpec
 
-    # Guard against the Agent re-buying while a recipe is already executing;
-    # maps the running offer/listing id to its cooperative abort flag.
-    _running_recipes: dict[str, threading.Event]
+    _recipe_runs: dict[str, RunRecord]
+    _recipe_runs_lock: threading.Lock
 
     @property
-    def _active_runs(self) -> dict[str, threading.Event]:
-        runs = getattr(self, "_running_recipes", None)
+    def _runs(self) -> dict[str, RunRecord]:
+        runs = getattr(self, "_recipe_runs", None)
         if runs is None:
             runs = {}
-            self._running_recipes = runs
+            self._recipe_runs = runs
         return runs
+
+    @property
+    def _runs_lock(self) -> threading.Lock:
+        lock = getattr(self, "_recipe_runs_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._recipe_runs_lock = lock
+        return lock
+
+    @staticmethod
+    def _run_id(kind: str, ident: str) -> str:
+        return f"{kind}:{ident}"
 
     @property
     def _chain(self) -> ChainClient:
@@ -89,6 +123,35 @@ class MarketSkillContainer(Module):
         # Runtime switch; falls back to the configured default until toggled.
         state = getattr(self, "_auto_publish", None)
         return bool(self.config.auto_publish) if state is None else bool(state)
+
+    def _amount_rejection(self, amount_wei: int, operation: str) -> str | None:
+        """Return a refusal reason when an amount violates configured limits."""
+        if amount_wei <= 0:
+            return f"Refused {operation}: amount must be greater than 0 INJ."
+        maximum_wei = inj_to_wei(self.config.max_transaction_inj)
+        if amount_wei > maximum_wei:
+            return (
+                f"Refused {operation}: {wei_to_inj(amount_wei)} INJ exceeds the "
+                f"configured single-transaction limit of "
+                f"{self.config.max_transaction_inj} INJ."
+            )
+        return None
+
+    def _spend_rejection(self, amount_wei: int, operation: str) -> str | None:
+        """Apply amount limits and retain the configured gas reserve on-chain."""
+        rejection = self._amount_rejection(amount_wei, operation)
+        if rejection is not None or self.config.chain_backend != "injective":
+            return rejection
+        reserve_wei = inj_to_wei(self.config.min_gas_reserve_inj)
+        balance_wei = self._chain.balance_of(self._chain.address)
+        if balance_wei < amount_wei + reserve_wei:
+            return (
+                f"Refused {operation}: wallet balance is "
+                f"{wei_to_inj(balance_wei)} INJ; spending "
+                f"{wei_to_inj(amount_wei)} INJ must leave at least "
+                f"{self.config.min_gas_reserve_inj} INJ for gas."
+            )
+        return None
 
     @rpc
     def start(self) -> None:
@@ -141,12 +204,23 @@ class MarketSkillContainer(Module):
                 f"the full market loop off-chain. Auto-publish is {auto}."
             )
 
+        pending_reader = getattr(chain, "pending_transaction", None)
+        pending = pending_reader() if callable(pending_reader) else None
+        pending_note = (
+            " No persisted transaction is awaiting recovery."
+            if pending is None
+            else (
+                f" Pending transaction nonce={pending.nonce}, "
+                f"hash={pending.transaction_hash[:12]}... will be recovered "
+                "before the next write."
+            )
+        )
         logger.info("chain_status: injective reachable for %s", address)
         return (
             f"On-chain check: backend=injective, chain_id={cfg.chain_id}, "
             f"contract={cfg.market_contract}. Wallet {address} is reachable on "
             f"{cfg.rpc_url} and holds {balance} INJ. Ready to transact on-chain. "
-            f"Auto-publish is {auto}."
+            f"Auto-publish is {auto}.{pending_note}"
         )
 
     @skill
@@ -289,7 +363,7 @@ class MarketSkillContainer(Module):
         )
 
     @skill
-    def publish_skill(self, description: str, price: float, query: str) -> str:
+    def publish_skill(self, description: str, price: str, query: str) -> str:
         """Distill a completed task from memory and list it for sale on-chain.
 
         The supply side of the market: turns recorded experience into a
@@ -302,13 +376,17 @@ class MarketSkillContainer(Module):
         Args:
             description: What the skill does, as buyers will see it
                 (e.g. ``"climb a 20cm ramp"``).
-            price: Sale price in INJ per purchase (e.g. ``0.05``).
+            price: Exact decimal INJ price per purchase (e.g. ``"0.05"``).
             query: Text used to pick the recorded experience to distil
                 (semantic frame selection, like ``distill_and_publish``).
 
         Returns:
             A confirmation including the new listing id.
         """
+        price_wei = inj_to_wei(price)
+        rejection = self._amount_rejection(price_wei, "skill listing")
+        if rejection is not None:
+            return rejection
         recipe, recipe_uri = get_default_distiller().distill(
             intent=description,
             source=self.config.memory_db,
@@ -323,17 +401,18 @@ class MarketSkillContainer(Module):
             tags=[],
             recipe_uri=recipe_uri,
             recipe_hash=recipe.content_hash(),
-            price=inj_to_wei(price),
+            price=price_wei,
         )
         logger.info("listed skill %s (%s INJ)", listing_id, price)
         return (
-            f"Listed skill {listing_id}: {description!r} at {price} INJ "
+            f"Listed skill {listing_id}: {description!r} at "
+            f"{wei_to_inj(price_wei)} INJ "
             f"({len(recipe.steps)} steps). Other robots can now find it with "
             f"search_skills and buy it with buy_and_run."
         )
 
     @skill
-    def publish_request(self, need: str, budget: float) -> str:
+    def publish_request(self, need: str, budget: str) -> str:
         """Publish a hard situation as an on-chain request with an escrow budget.
 
         Registers a request on the market board and locks ``budget`` INJ in
@@ -342,16 +421,20 @@ class MarketSkillContainer(Module):
 
         Args:
             need: Natural-language description of the task the robot cannot do.
-            budget: INJ amount to escrow as the bounty (e.g. ``1.5``).
+            budget: Exact decimal INJ amount to escrow (e.g. ``"1.5"``).
 
         Returns:
             A human-readable confirmation including the new request id.
         """
         budget_wei = inj_to_wei(budget)
+        rejection = self._spend_rejection(budget_wei, "request publication")
+        if rejection is not None:
+            return rejection
         request_id = self._chain.publish_request(need, budget_wei, tags=[])
         logger.info("published request %s (budget=%s INJ)", request_id, budget)
         return (
-            f"Published request {request_id} with a {budget} INJ escrow budget. "
+            f"Published request {request_id} with a "
+            f"{wei_to_inj(budget_wei)} INJ escrow budget. "
             f"Other dogs can now answer it with a recipe."
         )
 
@@ -411,7 +494,8 @@ class MarketSkillContainer(Module):
             offer_id: The id of the offer to accept and execute.
 
         Returns:
-            A per-step execution report; call ``pay`` if it succeeded.
+            A background run id to inspect with ``run_status``. Call ``pay``
+            only after that run reports ``state=succeeded``.
         """
         offer = self._chain.get_offer(offer_id)
         try:
@@ -439,35 +523,49 @@ class MarketSkillContainer(Module):
                 f"{'; '.join(problems)}"
             )
 
-        # Prevent re-execution while the same offer is already running.
-        if offer_id in self._active_runs:
-            return (
-                f"Offer {offer_id} is already running on the robot. "
-                f"Wait for it to finish, then call pay(offer_id='{offer_id}') "
-                f"— or call stop_run() to abort it."
-            )
+        run_id = self._run_id("offer", offer_id)
+        with self._runs_lock:
+            previous = self._runs.get(run_id)
+            if previous is not None:
+                return (
+                    f"Offer {offer_id} already has local run {run_id} in "
+                    f"state={previous.phase.value}. Call run_status(run_id="
+                    f"'{run_id}') instead of executing it again."
+                )
 
         self._chain.accept_offer(offer_id)
-        abort = threading.Event()
-        self._active_runs[offer_id] = abort
+        record = RunRecord(run_id=run_id)
+        with self._runs_lock:
+            self._runs[run_id] = record
 
         # Run in background — real robot moves far exceed MCP's 120s HTTP
         # timeout; return immediately so the agent loop stays alive.
         def _bg_run() -> None:
             try:
-                report = interpreter.run(recipe, abort=abort)
+                report = interpreter.run(recipe, abort=record.abort)
+                phase = (
+                    RunPhase.ABORTED
+                    if record.abort.is_set()
+                    else RunPhase.SUCCEEDED
+                    if report.ok
+                    else RunPhase.FAILED
+                )
+                with self._runs_lock:
+                    record.phase = phase
+                    record.summary = report.summary()
                 logger.info("ran offer %s -> ok=%s", offer_id, report.ok)
             except Exception as exc:
+                with self._runs_lock:
+                    record.phase = RunPhase.FAILED
+                    record.summary = f"execution error: {exc!r}"
                 logger.error("background run failed for offer %s: %s", offer_id, exc)
-            finally:
-                self._active_runs.pop(offer_id, None)
 
         threading.Thread(target=_bg_run, daemon=True, name=f"run-{offer_id}").start()
         return (
             f"Offer {offer_id} accepted and recipe execution started "
-            f"({len(recipe.steps)} steps running in background). "
-            f"Do NOT call fetch_and_run again. Wait for the robot to finish, "
-            f"then call pay(offer_id='{offer_id}')."
+            f"as {run_id} ({len(recipe.steps)} background steps). Call "
+            f"run_status(run_id='{run_id}'); pay is enabled only after it "
+            f"reports state=succeeded."
         )
 
     @skill
@@ -491,6 +589,11 @@ class MarketSkillContainer(Module):
         listing = self._chain.get_listing(listing_id)
         if not listing.active:
             return f"Refused listing {listing_id}: it is no longer active. Nothing was paid."
+        rejection = self._spend_rejection(
+            listing.price, f"listing {listing_id} purchase"
+        )
+        if rejection is not None:
+            return rejection + " Nothing was paid."
         try:
             recipe = load_recipe(listing.recipe_uri)
         except (OSError, ValueError) as exc:
@@ -515,37 +618,78 @@ class MarketSkillContainer(Module):
                 f"{'; '.join(problems)}. Nothing was paid."
             )
 
-        # Prevent re-purchase while the same recipe is already running.
-        if listing_id in self._active_runs:
-            return (
-                f"Listing {listing_id} is already running on the robot "
-                f"(bought earlier this session). Wait for it to finish — "
-                f"do NOT buy again. The robot is moving. "
-                f"Call stop_run() if it must be aborted."
-            )
+        run_id = self._run_id("listing", listing_id)
+        with self._runs_lock:
+            previous = self._runs.get(run_id)
+            if previous is not None:
+                return (
+                    f"Listing {listing_id} already has local run {run_id} in "
+                    f"state={previous.phase.value}; it will not be purchased again."
+                )
 
         tx_ref = self._chain.buy_skill(listing_id)
         price = wei_to_inj(listing.price)
-        abort = threading.Event()
-        self._active_runs[listing_id] = abort
+        record = RunRecord(run_id=run_id, payment_tx=tx_ref)
+        with self._runs_lock:
+            self._runs[run_id] = record
 
         # Run in background — real robot moves far exceed MCP's 120s HTTP
         # timeout; return immediately so the agent loop stays alive.
         def _bg_run() -> None:
             try:
-                report = interpreter.run(recipe, abort=abort)
+                report = interpreter.run(recipe, abort=record.abort)
+                phase = (
+                    RunPhase.ABORTED
+                    if record.abort.is_set()
+                    else RunPhase.SUCCEEDED
+                    if report.ok
+                    else RunPhase.FAILED
+                )
+                with self._runs_lock:
+                    record.phase = phase
+                    record.summary = report.summary()
                 logger.info("bought listing %s for %s INJ -> ok=%s", listing_id, price, report.ok)
             except Exception as exc:
+                with self._runs_lock:
+                    record.phase = RunPhase.FAILED
+                    record.summary = f"execution error: {exc!r}"
                 logger.error("background run failed for listing %s: %s", listing_id, exc)
-            finally:
-                self._active_runs.pop(listing_id, None)
 
         threading.Thread(target=_bg_run, daemon=True, name=f"run-{listing_id}").start()
         return (
             f"Bought listing {listing_id} for {price} INJ (tx {tx_ref}). "
-            f"Recipe execution started ({len(recipe.steps)} steps running in background on the robot). "
-            f"Do NOT call buy_and_run again — just wait for the robot to finish moving."
+            f"Recipe execution started as {run_id} ({len(recipe.steps)} background "
+            f"steps). Call run_status(run_id='{run_id}') for its result."
         )
+
+    @skill
+    def run_status(self, run_id: str = "") -> str:
+        """Report background recipe execution state and its final sandbox result.
+
+        Args:
+            run_id: The id returned by ``fetch_and_run`` or ``buy_and_run``
+                (for example ``"offer:1"``). Empty lists every session run.
+
+        Returns:
+            Current state; successful offer runs are eligible for ``pay``.
+        """
+        with self._runs_lock:
+            if run_id:
+                records = [self._runs[run_id]] if run_id in self._runs else []
+            else:
+                records = list(self._runs.values())
+            snapshots = [
+                (record.run_id, record.phase.value, record.summary)
+                for record in records
+            ]
+        if not snapshots:
+            target = f" {run_id}" if run_id else ""
+            return f"No local recipe run{target} is recorded in this process."
+        lines = []
+        for ident, phase, summary in snapshots:
+            detail = f"\n{summary}" if summary else ""
+            lines.append(f"{ident}: state={phase}{detail}")
+        return "\n\n".join(lines)
 
     @skill
     def pay(self, offer_id: str) -> str:
@@ -562,14 +706,35 @@ class MarketSkillContainer(Module):
             A confirmation of the release and the rating written.
         """
         offer = self._chain.get_offer(offer_id)
+        if offer.status is OfferStatus.PAID:
+            return f"Offer {offer_id} is already paid; no second release was sent."
+        run_id = self._run_id("offer", offer_id)
+        with self._runs_lock:
+            record = self._runs.get(run_id)
+            phase = None if record is None else record.phase
+        if phase is not RunPhase.SUCCEEDED:
+            state = "unknown" if phase is None else phase.value
+            return (
+                f"Refused payment for offer {offer_id}: local run {run_id} has "
+                f"state={state}, not succeeded. Check run_status; escrow remains locked."
+            )
+        assert record is not None
         release_ref = self._chain.release_payment(offer_id)
+        with self._runs_lock:
+            record.phase = RunPhase.SETTLED
+            record.payment_tx = release_ref
         score = self.config.default_rating
-        self._chain.rate(offer_id, ratee=offer.responder, score=score)
+        try:
+            self._chain.rate(offer_id, ratee=offer.responder, score=score)
+            rating_note = f"and rated the recipe {score}/5"
+        except Exception as exc:
+            logger.error("payment released but rating failed for %s: %s", offer_id, exc)
+            rating_note = f"but rating failed: {exc}"
         amount = wei_to_inj(offer.price)
         logger.info("settled offer %s (ref=%s)", offer_id, release_ref)
         return (
             f"Released {amount} INJ to {offer.responder} for offer {offer_id} "
-            f"and rated the recipe {score}/5 (tx {release_ref})."
+            f"{rating_note} (tx {release_ref})."
         )
 
     @skill
@@ -586,12 +751,17 @@ class MarketSkillContainer(Module):
         Returns:
             Which runs were signalled to stop, or a note that none were active.
         """
-        runs = self._active_runs
-        if not runs:
+        with self._runs_lock:
+            running = [
+                record
+                for record in self._runs.values()
+                if record.phase is RunPhase.RUNNING
+            ]
+        if not running:
             return "No recipe is running in the background; nothing to stop."
-        ids = sorted(runs)
-        for abort in runs.values():
-            abort.set()
+        ids = sorted(record.run_id for record in running)
+        for record in running:
+            record.abort.set()
         logger.info("stop_run signalled %d active run(s): %s", len(ids), ids)
         return (
             f"Signalled {len(ids)} background run(s) to stop: {', '.join(ids)}. "

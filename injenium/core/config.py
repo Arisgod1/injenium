@@ -28,9 +28,11 @@ deliberately absent from this config (spec assumption #4).
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Literal
 
 from dimos.core.module import ModuleConfig
+from pydantic import Field
 
 # Public defaults kept as named constants (referenced from prompts/docs).
 INJECTIVE_TESTNET_CHAIN_ID = 1439
@@ -67,6 +69,15 @@ class ChainConfigMixin(ModuleConfig):
     market_contract: str | None = None
     chain_id: int = INJECTIVE_TESTNET_CHAIN_ID
 
+    # Transaction confirmation policy. Receipt polling is backed by sender /
+    # nonce block scans for RPCs whose receipt index lags chain state.
+    tx_receipt_timeout: float = Field(default=180.0, gt=0)
+    tx_poll_interval: float = Field(default=2.0, gt=0)
+    tx_broadcast_attempts: int = Field(default=3, ge=1, le=10)
+    tx_confirmations: int = Field(default=1, ge=1)
+    pending_tx_path: str = "injenium_artifacts/pending_txs.json"
+    tx_recovery_scan_blocks: int = Field(default=2048, ge=1)
+
 
 class MarketConfig(ChainConfigMixin):
     """Config for :class:`MarketSkillContainer`."""
@@ -84,6 +95,11 @@ class MarketConfig(ChainConfigMixin):
 
     # Default rating written after a successful settlement (1..5).
     default_rating: int = 5
+
+    # Safety rails for agent-initiated value transfers. Mainnet deployments
+    # should normally override the cap with a smaller operational limit.
+    max_transaction_inj: Decimal = Field(default=Decimal("10"), gt=0)
+    min_gas_reserve_inj: Decimal = Field(default=Decimal("0.01"), ge=0)
 
     # Off-chain recipe storage: "local" (PoC default; recipe_uri is a local dir)
     # or "ipfs" (pin the recipe dir, put an ipfs://<cid> on-chain so two

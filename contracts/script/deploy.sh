@@ -17,8 +17,20 @@ set -euo pipefail
 
 NET="${1:-testnet}"
 case "$NET" in
-  testnet) RPC_ALIAS="injectiveTestnet"; EXPLORER="https://testnet.blockscout.injective.network" ;;
-  mainnet) RPC_ALIAS="injectiveMainnet"; EXPLORER="https://blockscout.injective.network" ;;
+  testnet)
+    RPC_ALIAS="injectiveTestnet"
+    RPC_URL="https://k8s.testnet.json-rpc.injective.network/"
+    CHAIN_ID="1439"
+    EXPLORER="https://testnet.blockscout.injective.network"
+    VERIFIER_URL="https://testnet.blockscout-api.injective.network/api"
+    ;;
+  mainnet)
+    RPC_ALIAS="injectiveMainnet"
+    RPC_URL="https://sentry.evm-rpc.injective.network/"
+    CHAIN_ID="1776"
+    EXPLORER="https://blockscout.injective.network"
+    VERIFIER_URL="https://blockscout-api.injective.network/api"
+    ;;
   *) echo "usage: $0 [testnet|mainnet]" >&2; exit 2 ;;
 esac
 
@@ -36,17 +48,21 @@ forge create src/Market.sol:Market \
   --private-key "$INJECTIVE_PRIVATE_KEY" \
   --broadcast \
   --verify --verifier blockscout \
-  --verifier-url "${EXPLORER}/api"
+  --verifier-url "$VERIFIER_URL"
 
 cat <<EOF
 
 Done. Wire the agent to the deployed address (both modules need it):
 
   dimos run injenium.market \\
-    -o marketskillcontainer.chain_backend=injective \\
-    -o marketskillcontainer.market_contract=<ADDRESS> \\
-    -o requestlistener.chain_backend=injective \\
-    -o requestlistener.market_contract=<ADDRESS>
+    --marketskillcontainer.chain-backend injective \\
+    --marketskillcontainer.market-contract <ADDRESS> \\
+    --marketskillcontainer.chain-id ${CHAIN_ID} \\
+    --marketskillcontainer.rpc-url ${RPC_URL} \\
+    --requestlistener.chain-backend injective \\
+    --requestlistener.market-contract <ADDRESS> \\
+    --requestlistener.chain-id ${CHAIN_ID} \\
+    --requestlistener.rpc-url ${RPC_URL}
 
 Verify on Blockscout: ${EXPLORER}/address/<ADDRESS>
 EOF

@@ -46,6 +46,12 @@ def build_chain_client(config: ChainConfigMixin) -> ChainClient:
             rpc_url=config.rpc_url,
             contract_address=config.market_contract,
             chain_id=config.chain_id,
+            receipt_timeout=config.tx_receipt_timeout,
+            poll_interval=config.tx_poll_interval,
+            broadcast_attempts=config.tx_broadcast_attempts,
+            confirmations=config.tx_confirmations,
+            pending_store_path=config.pending_tx_path,
+            recovery_scan_blocks=config.tx_recovery_scan_blocks,
         )
 
     raise ValueError(f"unknown chain_backend {config.chain_backend!r}")

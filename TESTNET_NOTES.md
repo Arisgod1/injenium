@@ -10,7 +10,8 @@
 ## TL;DR
 - ✅ **合约已真实部署到 Injective 测试网并可读**:`Market` @ `0x7Eab155DCae4Be8837678Af3ca96909b4141104E`(`eth_getCode` 返回字节码)。
 - ✅ **写路径已验证**:`publishRequest` 成功落链 —— `getRequest(1)` 读到 request #1(requester=部署者、budget=0.1 INJ、status=Open、need/tags 正确)。
-- ⚠️ **自动闭环脚本在"等回执"处超时**:Injective EVM 对该 eth tx hash `eth_getTransactionReceipt` 返回 `null`(回执/哈希索引延迟),但交易实际已上链(nonce 前进、状态已变)。属客户端"同步等回执"设计与 Injective 不匹配,**非逻辑错误**。
+- ✅ **回执索引延迟已有客户端兜底**:交易管理器除查询 receipt 外,还会扫描区块中的
+  sender+nonce、校验调用 payload,并从事件/合约状态恢复新 ID。
 
 ## 部署产物
 | 项 | 值 |
@@ -30,7 +31,8 @@
 5. **`forge create` 全程 TLS 握手失败** — `tls handshake eof`(6/6),但 curl / web3(OpenSSL)能连同一端点。根因:forge 的 Rust TLS 栈与该 RPC 不兼容。→ **改用 web3.py 部署**(`contracts/deploy_web3.py`),读 forge 已编译的字节码发交易。
 6. **web3 偶发 SSL EOF / 可能挂起** — 根因:端点握手偶发中断 + `HTTPProvider` 无超时。→ `InjectiveClient` 改用带 `timeout=30` + urllib3 `Retry(connect=6, read=0)` 的 session(**只重试连接层,已发出的交易绝不重发**)。
 7. **沙箱只写工作区** — dimos logger 写 `projects/dimos/logs` 被拒(`Operation not permitted`)。根因:工作区外不可写。→ 该命令需在沙箱外(完整权限)运行。
-8. **等回执超时但交易已上链** — `wait_for_transaction_receipt` 120s 超时;但 nonce 1→2、`getRequest(1)` 读到完整请求。根因:Injective EVM 回执按 eth-hash 查询有延迟/映射差异。→ 见「遗留问题」。
+8. **等回执超时但交易已上链** — 历史版本的 `wait_for_transaction_receipt`
+   曾在 nonce 1→2、`getRequest(1)` 已可读时仍超时。现由 `TxManager` 的区块扫描和状态回读处理。
 
 ## 可复用资产
 | 资产 | 用途 |
@@ -41,11 +43,15 @@
 | `TESTING.md` + 本地 anvil 流程 | 上真网前的三层预验证:mock → anvil(真 EVM)→ testnet |
 | 身份/领水一行命令 | `ROBOT_IP`+`WALLET_SALT` 派生地址与私钥 |
 
-## 遗留问题与建议(Injective EVM 适配)
-`InjectiveClient._send` 依赖 `wait_for_transaction_receipt(tx_hash)`,`_decode_id` 依赖回执日志取 id —— 在 Injective EVM 上不可靠(回执按 hash 查不到)。标准 EVM(anvil/以太坊)无此问题,L2 anvil 闭环已全绿。建议改造(未做,PoC 已达"部署+写路径验证"目标):
-1. 发送后**轮询发送方 nonce 前进 / 区块高度**确认交易被纳入,而非死等该 hash 的回执;
-2. 新 id 从**合约状态读回**(如 `nextRequestId-1`、`openRequestIds()`、`offerIdsOf()`),不依赖回执事件日志;
-3. 或加大回执超时并在 null 时重试查询。
+## Injective EVM 交易确认策略
+`InjectiveClient` 通过 `TxManager` 串行管理本地 nonce,同一签名原文可有限次幂等广播。
+确认顺序是 receipt → 新区块 sender+nonce 扫描 → payload 校验;创建类交易的 ID
+按 receipt 日志 → 确认区块日志 → 计数器范围内的链状态匹配恢复。同 nonce 若出现不同
+payload 会明确报替换错误,不会当成本次交易成功。
+
+广播前,签名原文会原子写入 `pending_tx_path`(权限 `0600`)。进程重启后下一次写交易
+会先恢复该 nonce:已入块则确认并清理,nonce 未前进则原样重播,nonce 已被未知交易占用
+则停止并保留记录供人工核对。
 
 ## 复现要点
 - 环境:dimos venv(Python 3.12),`pip install -e '.[chain]'`;Foundry(仅用其 `forge build` 编译,部署走 web3)。

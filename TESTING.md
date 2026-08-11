@@ -4,9 +4,10 @@
 前两层零私钥、零资金、可随时跑;第三层才需要你已领水的私钥。项目遵循「仅接口级验收、不写单元测试」,以下均为手动/端到端验证。
 
 > 关键约定
-> - **运行环境**:必须用 dimos 的 venv(Python 3.12),`injenium` 已 `pip install -e '.[chain]'` 装入其中。
->   `source /Users/arisone/projects/dimos/.venv/bin/activate`(下文 `python` 均指该 venv)。
-> - **dimos 配置覆盖格式**:`-o 模块.字段=值`(可重复),**不是** `--模块-字段`。模块键:`marketskillcontainer`、`requestlistener`。
+> - **运行环境**:必须用 dimOS 的 venv(Python 3.12),`injenium` 已 `pip install -e '.[chain]'` 装入其中。
+>   例如 `source /path/to/dimos/.venv/bin/activate`(下文 `python` 均指该 venv)。
+> - **dimOS 配置格式**:使用 blueprint 长选项，例如 `--marketskillcontainer.chain-backend mock`。
+>   运行 `dimos run injenium.market --help` 可查看当前版本的完整参数。
 > - **身份**:每台机器 `ROBOT_IP` + `WALLET_SALT` 确定性派生钱包;显式 `INJECTIVE_PRIVATE_KEY` 优先;主网(1439→1776)拒绝 IP 派生。
 
 ---
@@ -16,8 +17,8 @@
 纯本地内存/文件账本,验证市场逻辑与沙箱。
 
 ```bash
-source /Users/arisone/projects/dimos/.venv/bin/activate
-cd /Users/arisone/projects/dog/injenium
+source /path/to/dimos/.venv/bin/activate
+cd /path/to/injenium
 
 # M2 蒸馏:录制记忆 -> 去隐私配方 + 模板图(用 HF 离线避免联网噪声)
 HF_HUB_OFFLINE=1 python demo/demo_m2_distill.py
@@ -41,7 +42,7 @@ python demo/demo_m4_mock_loop.py --db /nonexistent
 
 ```bash
 export PATH="$HOME/.foundry/bin:$PATH"      # forge/anvil 在 PATH 即可(homebrew 亦可)
-cd /Users/arisone/projects/dog/injenium
+cd /path/to/injenium
 
 # 1) 编译合约
 forge build --root contracts                # Solc 0.8.24,应 "compilation successful"
@@ -88,13 +89,14 @@ ROBOT_IP=10.88.15.25 WALLET_SALT='你的部署机密' python -c "import os;from 
 
 ### 3.3 部署 + 验证
 ```bash
-cd /Users/arisone/projects/dog/injenium
+cd /path/to/injenium
 # 首选 Foundry:
 INJECTIVE_PRIVATE_KEY=0x<你的KEY> ./contracts/script/deploy.sh testnet
 # ⬇ 若 forge 报 `tls handshake eof`（它的 Rust TLS 与该 RPC 不兼容），改用 web3.py 兜底：
 (cd contracts && forge build) && INJECTIVE_PRIVATE_KEY=0x<你的KEY> python contracts/deploy_web3.py --network testnet   # 打印合约地址
 ```
-> ℹ️ Injective EVM 回执按 eth-hash 查询有延迟，`demo_m5_onchain.py` 可能在等回执处超时，但交易通常已上链（用 `eth_call getRequest(id)` / nonce / Blockscout 核实）。详见 `TESTNET_NOTES.md`。
+> ℹ️ Injective EVM 回执按 eth-hash 查询可能延迟。客户端会用区块 sender+nonce
+> 和链状态兜底确认；若仍超时，用 `eth_call getRequest(id)` / nonce / Blockscout 核实。
 
 ### 3.4 跑真链闭环
 ```bash
@@ -109,32 +111,33 @@ python demo/demo_m5_onchain.py \
 
 ## 接口级验收(dimos mcp,无 LLM 驱动技能)
 
-`injenium.market` 已挂 `McpServer`,可用命令直接驱动 12 个 `@skill`(只读自检/浏览 + 悬赏闭环 + 技能货架 + 中止;可指向 mock 或测试网)。
+`injenium.market` 已挂 `McpServer`,可用命令直接驱动 13 个 `@skill`(只读自检/浏览 + 悬赏闭环 + 技能货架 + 运行状态/中止;可指向 mock 或测试网)。
 
 ```bash
 # 起 headless 市场服务(后台);指向测试网需给两个模块都配链
 dimos run injenium.market -d \
-  -o marketskillcontainer.chain_backend=injective \
-  -o marketskillcontainer.market_contract=0x<部署地址> \
-  -o marketskillcontainer.chain_id=1439 \
-  -o marketskillcontainer.rpc_url=https://k8s.testnet.json-rpc.injective.network/ \
-  -o marketskillcontainer.memory_db=/Users/arisone/projects/dimos/data/go2_short.db \
-  -o requestlistener.chain_backend=injective \
-  -o requestlistener.market_contract=0x<部署地址> \
-  -o requestlistener.chain_id=1439 \
-  -o requestlistener.rpc_url=https://k8s.testnet.json-rpc.injective.network/
+  --marketskillcontainer.chain-backend injective \
+  --marketskillcontainer.market-contract 0x<部署地址> \
+  --marketskillcontainer.chain-id 1439 \
+  --marketskillcontainer.rpc-url https://k8s.testnet.json-rpc.injective.network/ \
+  --marketskillcontainer.memory-db /path/to/dimos/data/go2_short.db \
+  --requestlistener.chain-backend injective \
+  --requestlistener.market-contract 0x<部署地址> \
+  --requestlistener.chain-id 1439 \
+  --requestlistener.rpc-url https://k8s.testnet.json-rpc.injective.network/
 
-dimos mcp list-tools                                       # 列出 12 个市场技能(自检/浏览 + 悬赏闭环 + 技能货架 + 中止)
+dimos mcp list-tools                                       # 列出 13 个市场技能(含运行状态/中止)
 dimos mcp call chain_status                                # 只读自检:钱包/余额/链是否可达(不花钱)
 dimos mcp call list_requests                               # 只读浏览:板上开放请求(不花钱)
-dimos mcp call publish_request --arg need="climb the ramp" --arg budget=0.1
+dimos mcp call publish_request --json-args '{"need":"climb the ramp","budget":"0.1"}'
 dimos mcp call distill_and_publish --arg request_id=1 --arg query="ramp"
 dimos mcp call list_offers --arg request_id=1              # 拿到 offer_id 再 fetch_and_run
 dimos mcp call fetch_and_run --arg offer_id=1
+dimos mcp call run_status --arg run_id=offer:1             # state=succeeded 后才能付款
 dimos mcp call pay --arg offer_id=1
 # 技能货架(供给侧):
 dimos mcp call set_auto_publish --arg enabled=true         # 开关:完成任务后自动挂牌
-dimos mcp call publish_skill --arg description="climb the ramp" --arg price=0.05 --arg query="ramp"
+dimos mcp call publish_skill --json-args '{"description":"climb the ramp","price":"0.05","query":"ramp"}'
 dimos mcp call search_skills --arg query="ramp"            # 拿到 listing_id
 dimos mcp call buy_and_run --arg listing_id=1              # 先验证后付款并执行
 dimos stop
@@ -160,7 +163,7 @@ dimos stop
 ### 常见坑
 - **必须装进 dimos venv**(Python 3.12),base(3.13)不满足 `requires-python` 且无 dimos。
 - **web3 连测试网**偶发 SSL/超时(环境出口抖动);`InjectiveClient` 已可用,若不稳定加 `request_kwargs={'timeout':20}` 并重试。
-- dimos 配置覆盖是 `-o 模块.字段=值`,别用 `--模块-字段`。
+- dimOS 配置使用 blueprint 长选项;字段中的下划线转换为短横线。
 - 私钥仅在你本机(`.env` 已 gitignore 或命令行内联),切勿提交。
 
 ### 分层对照
