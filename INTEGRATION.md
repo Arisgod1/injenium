@@ -5,7 +5,7 @@
 
 ## 架构:你在复用什么
 项目分两层(重构后):
-- **`injenium.core`** —— 域无关的经验能力市场内核:链/合约、市场技能(共 11 个:只读自检/浏览 + 悬赏闭环 + 技能货架)、内容寻址
+- **`injenium.core`** —— 域无关的经验能力市场内核:链/合约、市场技能(共 12 个:只读自检/浏览 + 悬赏闭环 + 技能货架 + 中止)、内容寻址
   配方、**注册表驱动的沙箱**、身份、`build_market` 工厂。
 - **`injenium.domains.go2`** —— 机器狗领域插件:原语白名单 + dispatch 适配器、mock/真机
   provider、记忆蒸馏;用内核工厂产出 `injenium.market`(无头)/ `injenium.agentic`(整机)。
@@ -40,13 +40,13 @@ $(dirname $DPY)/dimos list | grep injenium # 应打印 injenium.agentic / injeni
 ```bash
 cd /path/to/injenium
 $(dirname $DPY)/dimos run injenium.market -d          # 无头:市场技能+监听+mock原语+McpServer
-$(dirname $DPY)/dimos mcp list-tools                  # 应看到 11 个技能(自检/浏览 + 悬赏闭环 + 技能货架)
+$(dirname $DPY)/dimos mcp list-tools                  # 应看到 12 个技能(自检/浏览 + 悬赏闭环 + 技能货架 + 中止)
 $(dirname $DPY)/dimos mcp call chain_status           # 只读自检:钱包/余额/链是否可达(不花钱)
 $(dirname $DPY)/dimos mcp call list_requests          # 只读浏览:板上开放请求(不花钱)
 $(dirname $DPY)/dimos mcp call publish_request --arg need="test" --arg budget=1.0
 $(dirname $DPY)/dimos stop
 ```
-能列出 11 个技能(只读自检/浏览 + 悬赏闭环 + 技能货架)、调用返回 str,即"技能契约"打通。
+能列出 12 个技能(只读自检/浏览 + 悬赏闭环 + 技能货架 + 中止)、调用返回 str,即“技能契约”打通。
 
 ## 步骤 3 · 配置身份 + 环境变量
 在机器狗上准备 `.env`(参考仓库 `.env.example`),或直接 export:

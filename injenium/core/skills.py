@@ -14,10 +14,11 @@ LLM calls to drive the closed loop:
     publish_request  -> distill_and_publish -> fetch_and_run -> pay
 
 plus read-only ``chain_status`` / ``list_requests`` / ``list_offers`` /
-``search_skills`` for self-check and browsing, and a supply side: a
+``search_skills`` for self-check and browsing, a supply side: a
 ``set_auto_publish`` switch, ``publish_skill`` to list a distilled skill for
 direct sale, and ``buy_and_run`` to purchase and execute a listing
-(validate-then-pay, mirroring ``fetch_and_run``).
+(validate-then-pay, mirroring ``fetch_and_run``) — and ``stop_run`` to abort a
+background recipe cooperatively.
 
 Each skill obeys the dimOS skill contract (docstring + fully typed args + ``str``
 return) so it shows up in ``dimos mcp list-tools`` and is callable via
@@ -63,14 +64,15 @@ class MarketSkillContainer(Module):
 
     _primitives: PrimitiveSkillsSpec
 
-    # Guard against the Agent re-buying while a recipe is already executing.
-    _running_recipes: set[str]
+    # Guard against the Agent re-buying while a recipe is already executing;
+    # maps the running offer/listing id to its cooperative abort flag.
+    _running_recipes: dict[str, threading.Event]
 
     @property
-    def _active_runs(self) -> set[str]:
+    def _active_runs(self) -> dict[str, threading.Event]:
         runs = getattr(self, "_running_recipes", None)
         if runs is None:
-            runs = set()
+            runs = {}
             self._running_recipes = runs
         return runs
 
@@ -184,7 +186,6 @@ class MarketSkillContainer(Module):
         Read-only browse for "did anyone answer my request?" / "which offers can
         I run?". Shows each offer's id, responder, price, recipe hash and
         status. After ``publish_request``, poll this to find an ``offer_id`` to
-        hand to ``fetch_and_run``. Spends nothing.
 
         Args:
             request_id: The request to list offers for (e.g. the id returned by
@@ -442,22 +443,24 @@ class MarketSkillContainer(Module):
         if offer_id in self._active_runs:
             return (
                 f"Offer {offer_id} is already running on the robot. "
-                f"Wait for it to finish, then call pay(offer_id='{offer_id}')."
+                f"Wait for it to finish, then call pay(offer_id='{offer_id}') "
+                f"— or call stop_run() to abort it."
             )
 
         self._chain.accept_offer(offer_id)
-        self._active_runs.add(offer_id)
+        abort = threading.Event()
+        self._active_runs[offer_id] = abort
 
         # Run in background — real robot moves far exceed MCP's 120s HTTP
         # timeout; return immediately so the agent loop stays alive.
         def _bg_run() -> None:
             try:
-                report = interpreter.run(recipe)
+                report = interpreter.run(recipe, abort=abort)
                 logger.info("ran offer %s -> ok=%s", offer_id, report.ok)
             except Exception as exc:
                 logger.error("background run failed for offer %s: %s", offer_id, exc)
             finally:
-                self._active_runs.discard(offer_id)
+                self._active_runs.pop(offer_id, None)
 
         threading.Thread(target=_bg_run, daemon=True, name=f"run-{offer_id}").start()
         return (
@@ -517,23 +520,25 @@ class MarketSkillContainer(Module):
             return (
                 f"Listing {listing_id} is already running on the robot "
                 f"(bought earlier this session). Wait for it to finish — "
-                f"do NOT buy again. The robot is moving."
+                f"do NOT buy again. The robot is moving. "
+                f"Call stop_run() if it must be aborted."
             )
 
         tx_ref = self._chain.buy_skill(listing_id)
         price = wei_to_inj(listing.price)
-        self._active_runs.add(listing_id)
+        abort = threading.Event()
+        self._active_runs[listing_id] = abort
 
         # Run in background — real robot moves far exceed MCP's 120s HTTP
         # timeout; return immediately so the agent loop stays alive.
         def _bg_run() -> None:
             try:
-                report = interpreter.run(recipe)
+                report = interpreter.run(recipe, abort=abort)
                 logger.info("bought listing %s for %s INJ -> ok=%s", listing_id, price, report.ok)
             except Exception as exc:
                 logger.error("background run failed for listing %s: %s", listing_id, exc)
             finally:
-                self._active_runs.discard(listing_id)
+                self._active_runs.pop(listing_id, None)
 
         threading.Thread(target=_bg_run, daemon=True, name=f"run-{listing_id}").start()
         return (
@@ -565,6 +570,33 @@ class MarketSkillContainer(Module):
         return (
             f"Released {amount} INJ to {offer.responder} for offer {offer_id} "
             f"and rated the recipe {score}/5 (tx {release_ref})."
+        )
+
+    @skill
+    def stop_run(self) -> str:
+        """Abort every recipe currently running in the background.
+
+        Call when the user says stop / wants to interrupt a bought or fetched
+        recipe mid-execution. Sets the cooperative abort flag on every active
+        run: the step already in flight finishes (or is cancelled by the
+        robot's own stop skill), and no further step is dispatched — so the
+        robot's movement capability is handed back to you. Costs nothing and
+        touches nothing on-chain; anything already paid stays paid.
+
+        Returns:
+            Which runs were signalled to stop, or a note that none were active.
+        """
+        runs = self._active_runs
+        if not runs:
+            return "No recipe is running in the background; nothing to stop."
+        ids = sorted(runs)
+        for abort in runs.values():
+            abort.set()
+        logger.info("stop_run signalled %d active run(s): %s", len(ids), ids)
+        return (
+            f"Signalled {len(ids)} background run(s) to stop: {', '.join(ids)}. "
+            f"The current step may take a moment to finish — use your own stop "
+            f"skill if the robot must halt immediately."
         )
 
 

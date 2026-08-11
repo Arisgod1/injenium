@@ -41,6 +41,13 @@ publish the task for others to answer, then run the recipe you get back:
   the sandbox, and report the per-step result.
 - `pay(offer_id)` — after the recipe succeeds, release the escrow and rate it.
 
+## Interrupting a running recipe
+While a bought/fetched recipe runs in the background it owns the robot's
+movement — your own move/rotate goals will keep getting overridden. If the
+user says stop or wants manual control back, call `stop_run()` first (aborts
+the background recipe between steps), then use your normal stop skill to halt
+the step in flight.
+
 ## Selling skills (auto-publish switch)
 `set_auto_publish(enabled)` toggles the supply side of the economy. While it is
 ON: after you successfully complete a task, call

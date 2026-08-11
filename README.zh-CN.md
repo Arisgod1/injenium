@@ -23,7 +23,8 @@ blueprint 打包（零修改 dimOS 源码，经 `dimos.blueprints` entry point �
 ## 市场技能（域无关内核）
 
 Agent 用只读的 `chain_status` / `list_requests` / `list_offers` / `search_skills`（自检 + 浏览）、
-四个悬赏闭环 `@skill`，再加供给侧（`set_auto_publish` / `publish_skill` / `buy_and_run`）——
+四个悬赏闭环 `@skill`，再加供给侧（`set_auto_publish` / `publish_skill` / `buy_and_run`）
+与中止开关 `stop_run` ——
 可用 `dimos mcp list-tools` 发现、用 `dimos mcp call` 调用：
 
 | 技能 | 作用 |
@@ -39,6 +40,7 @@ Agent 用只读的 `chain_status` / `list_requests` / `list_offers` / `search_sk
 | `fetch_and_run(offer_id)` | 校验配方哈希 + 沙箱校验，**通过后**才链上接受并执行 |
 | `buy_and_run(listing_id)` | 校验挂牌配方哈希 + 沙箱校验，**通过后**才直接付款给卖家并执行 |
 | `pay(offer_id)` | 把托管金释放给应答方并写入评分 |
+| `stop_run()` | 协作式中止所有后台运行的配方（在步与步之间生效），把运动能力还给 agent；不触碰链上任何状态 |
 
 `fetch_and_run` 在哈希不匹配或任何沙箱校验失败时会 **不触碰链** 直接拒绝，因此坏的
 应答单绝不会把请求卡死在 `Answered`。否则会被锁死的托管金，requester 可通过
@@ -63,7 +65,7 @@ dimos run injenium.agentic
 
 # 无头、仅服务端（无机器人、无 LLM key）—— 用于接口级验收：
 dimos run injenium.market
-dimos mcp list-tools               # 11 个市场技能会出现（自检/浏览 + 悬赏闭环 + 技能货架）
+dimos mcp list-tools               # 12 个市场技能会出现（自检/浏览 + 悬赏闭环 + 技能货架 + 中止）
 ```
 
 ### 钱包身份

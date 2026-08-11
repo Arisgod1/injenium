@@ -109,7 +109,7 @@ python demo/demo_m5_onchain.py \
 
 ## 接口级验收(dimos mcp,无 LLM 驱动技能)
 
-`injenium.market` 已挂 `McpServer`,可用命令直接驱动 11 个 `@skill`(只读自检/浏览 + 悬赏闭环 + 技能货架;可指向 mock 或测试网)。
+`injenium.market` 已挂 `McpServer`,可用命令直接驱动 12 个 `@skill`(只读自检/浏览 + 悬赏闭环 + 技能货架 + 中止;可指向 mock 或测试网)。
 
 ```bash
 # 起 headless 市场服务(后台);指向测试网需给两个模块都配链
@@ -124,7 +124,7 @@ dimos run injenium.market -d \
   -o requestlistener.chain_id=1439 \
   -o requestlistener.rpc_url=https://k8s.testnet.json-rpc.injective.network/
 
-dimos mcp list-tools                                       # 列出 11 个市场技能(自检/浏览 + 悬赏闭环 + 技能货架)
+dimos mcp list-tools                                       # 列出 12 个市场技能(自检/浏览 + 悬赏闭环 + 技能货架 + 中止)
 dimos mcp call chain_status                                # 只读自检:钱包/余额/链是否可达(不花钱)
 dimos mcp call list_requests                               # 只读浏览:板上开放请求(不花钱)
 dimos mcp call publish_request --arg need="climb the ramp" --arg budget=0.1

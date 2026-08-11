@@ -30,8 +30,9 @@ loop runs before any real deployment.
 ## Market skills (domain-neutral core)
 
 The agent uses read-only `chain_status` / `list_requests` / `list_offers` /
-`search_skills` (self-check + browse), four bounty-loop dimOS `@skill`s, and a
-supply side (`set_auto_publish` / `publish_skill` / `buy_and_run`) —
+`search_skills` (self-check + browse), four bounty-loop dimOS `@skill`s, a
+supply side (`set_auto_publish` / `publish_skill` / `buy_and_run`), and a
+`stop_run` abort switch —
 discoverable via `dimos mcp list-tools`, callable via `dimos mcp call`:
 
 | skill | what it does |
@@ -47,6 +48,7 @@ discoverable via `dimos mcp list-tools`, callable via `dimos mcp call`:
 | `fetch_and_run(offer_id)` | verify the recipe hash + sandbox-validate it, **then** accept on-chain and run it |
 | `buy_and_run(listing_id)` | verify the listing's recipe hash + sandbox-validate it, **then** pay the seller directly and run it |
 | `pay(offer_id)` | release the escrow to the responder and write a rating |
+| `stop_run()` | abort every background recipe cooperatively (between steps) — hands movement back to the agent; nothing on-chain is touched |
 
 `fetch_and_run` refuses — **without touching the chain** — on a hash mismatch or
 any sandbox violation, so a bad offer never strands a request in `Answered`.
@@ -74,7 +76,7 @@ dimos run injenium.agentic
 
 # headless, server-only (no robot, no LLM key) — for interface acceptance:
 dimos run injenium.market
-dimos mcp list-tools               # the 11 market skills appear (self-check/browse + bounty loop + skill shop)
+dimos mcp list-tools               # the 12 market skills appear (self-check/browse + bounty loop + skill shop + abort)
 ```
 
 ### Wallet identity

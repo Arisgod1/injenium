@@ -26,6 +26,7 @@ A recipe that fails validation is refused wholesale before any primitive runs
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -135,11 +136,19 @@ class SandboxInterpreter:
 
     # -- execution -----------------------------------------------------------
 
-    def run(self, recipe: Recipe) -> RunReport:
+    def run(self, recipe: Recipe, *, abort: threading.Event | None = None) -> RunReport:
         """Validate then execute ``recipe``; return a per-step report.
 
         In strict mode a non-empty validation raises
         :class:`RecipeValidationError` before any primitive is invoked.
+
+        Args:
+            recipe: the recipe to validate and execute.
+            abort: optional cooperative stop flag checked **between** steps;
+                once set, no further primitive is dispatched and the report
+                comes back failed with an "aborted" message. The in-flight
+                step is never interrupted mid-motion — cancelling it is the
+                caller's job (e.g. the robot's own stop skill).
         """
         problems = self.validate(recipe)
         if problems and self._strict:
@@ -147,6 +156,12 @@ class SandboxInterpreter:
 
         results: list[StepResult] = []
         for i, step in enumerate(recipe.steps):
+            if abort is not None and abort.is_set():
+                return RunReport(
+                    ok=False,
+                    steps=results,
+                    message=f"aborted before step {i} of {len(recipe.steps)}",
+                )
             step_problems = self._validate_step(step)
             if step_problems:
                 results.append(
